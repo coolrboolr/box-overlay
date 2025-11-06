@@ -11,10 +11,16 @@ const env_1 = require("./env");
 const HOST = "127.0.0.1";
 const JSON_LIMIT = "2mb";
 const app = (0, express_1.default)();
+const defaultTags = ["technology", "finance", "sports", "lifestyle", "entertainment"];
 app.use(express_1.default.json({ limit: JSON_LIMIT }));
 app.use(buildCorsMiddleware());
-app.get("/health", (_req, res) => {
+const healthHandler = (_req, res) => {
     res.json({ status: "ok", model: env_1.env.OLLAMA_MODEL, mock: env_1.env.MOCK_OLLAMA });
+};
+app.get("/health", healthHandler);
+app.get("/api/health", healthHandler);
+app.get("/api/tags", (_req, res) => {
+    res.json({ tags: defaultTags });
 });
 app.post("/api/analyze", async (req, res) => {
     const parseResult = schema_1.ItemAnalysisRequestSchema.safeParse(req.body);

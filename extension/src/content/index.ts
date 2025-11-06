@@ -27,6 +27,21 @@ const isDev = typeof process !== "undefined" && process.env?.NODE_ENV !== "produ
 
 let overlaysEnabled = true;
 
+function shouldIgnoreKeyEvent(event: KeyboardEvent): boolean {
+  const target = event.target as HTMLElement | null;
+  if (!target) {
+    return false;
+  }
+  const tagName = target.tagName?.toLowerCase();
+  if (tagName === "input" || tagName === "textarea" || tagName === "select") {
+    return true;
+  }
+  if (target.isContentEditable) {
+    return true;
+  }
+  return false;
+}
+
 function sendAnalyzeRequest(item: ItemAnalysisRequest): void {
   const message: RuntimeMessage = {
     type: "ANALYZE_REQUEST",
@@ -136,9 +151,16 @@ async function handleToggleOverlays(): Promise<void> {
 }
 
 void (async () => {
-  overlaysEnabled = await getGlobalEnabled();
-  if (!overlaysEnabled && isDev) {
-    console.debug("[content] overlays start disabled");
+  try {
+    overlaysEnabled = await getGlobalEnabled();
+    if (!overlaysEnabled && isDev) {
+      console.debug("[content] overlays start disabled");
+    }
+  } catch (error) {
+    if (isDev) {
+      console.warn("[content] failed to read overlay toggle state; defaulting to enabled", error);
+    }
+    overlaysEnabled = true;
   }
 })();
 
@@ -147,6 +169,25 @@ initializeScanner((batch) => {
     console.debug("[content] extracted batch", batch);
   }
   batch.forEach(sendAnalyzeRequest);
+});
+
+window.addEventListener("keydown", (event) => {
+  // Require only Alt/Option
+  if (!event.altKey || event.shiftKey || event.ctrlKey || event.metaKey) {
+    return;
+  }
+
+  // Use physical key so layouts/modifiers (e.g., Option+L => "¬" on macOS) still work.
+  if (event.code !== "KeyL") {
+    return;
+  }
+
+  if (shouldIgnoreKeyEvent(event)) {
+    return;
+  }
+
+  event.preventDefault();
+  void handleToggleOverlays();
 });
 
 chrome.runtime.onMessage.addListener((message) => {

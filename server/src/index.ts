@@ -16,11 +16,20 @@ const JSON_LIMIT = "2mb";
 
 const app = express();
 
+const defaultTags = ["technology", "finance", "sports", "lifestyle", "entertainment"];
+
 app.use(express.json({ limit: JSON_LIMIT }));
 app.use(buildCorsMiddleware());
 
-app.get("/health", (_req, res) => {
+const healthHandler = (_req: express.Request, res: express.Response) => {
   res.json({ status: "ok", model: env.OLLAMA_MODEL, mock: env.MOCK_OLLAMA });
+};
+
+app.get("/health", healthHandler);
+app.get("/api/health", healthHandler);
+
+app.get("/api/tags", (_req, res) => {
+  res.json({ tags: defaultTags });
 });
 
 app.post("/api/analyze", async (req, res) => {

@@ -13,15 +13,59 @@ const dismissedIds = new Set<string>();
 const lastPayloadById = new Map<string, ItemAnalysisResponse>();
 
 const OVERLAY_ENABLED_KEY = "overlayEnabled";
+const isDev = typeof process !== "undefined" && process.env?.NODE_ENV !== "production";
+
+function storageUnavailableWarning(action: string, error: unknown): void {
+  if (isDev) {
+    console.warn(`[content] storage.${action} unavailable; falling back`, error);
+  }
+}
 
 export async function setGlobalEnabled(enabled: boolean): Promise<void> {
-  await chrome.storage.session.set({ [OVERLAY_ENABLED_KEY]: enabled });
+  if (!chrome.storage?.session?.set) {
+    storageUnavailableWarning("set", "session storage API missing");
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    try {
+      chrome.storage.session.set({ [OVERLAY_ENABLED_KEY]: enabled }, () => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          storageUnavailableWarning("set", err.message);
+        }
+        resolve();
+      });
+    } catch (error) {
+      storageUnavailableWarning("set", error);
+      resolve();
+    }
+  });
 }
 
 export async function getGlobalEnabled(): Promise<boolean> {
-  const result = await chrome.storage.session.get(OVERLAY_ENABLED_KEY);
-  const value = result[OVERLAY_ENABLED_KEY];
-  return value === undefined ? true : Boolean(value);
+  if (!chrome.storage?.session?.get) {
+    storageUnavailableWarning("get", "session storage API missing");
+    return true;
+  }
+
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.session.get(OVERLAY_ENABLED_KEY, (result) => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          storageUnavailableWarning("get", err.message);
+          resolve(true);
+          return;
+        }
+        const value = result?.[OVERLAY_ENABLED_KEY];
+        resolve(value === undefined ? true : Boolean(value));
+      });
+    } catch (error) {
+      storageUnavailableWarning("get", error);
+      resolve(true);
+    }
+  });
 }
 
 export async function toggleGlobalEnabled(): Promise<boolean> {
