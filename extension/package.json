@@ -1,0 +1,24 @@
+{
+  "name": "llm-overlay-extension",
+  "version": "0.1.0",
+  "description": "Manifest V3 extension scaffold for the local summarization overlay project.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate:icons": "node ./scripts/generate-icons.mjs",
+    "copy:static": "node ./scripts/copy-static.mjs",
+    "prebuild": "npm run generate:icons",
+    "build": "tsup",
+    "watch": "npm run generate:icons && tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"src/**/*.{ts,tsx}\""
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.263",
+    "@typescript-eslint/eslint-plugin": "^7.8.0",
+    "@typescript-eslint/parser": "^7.8.0",
+    "eslint": "^8.57.0",
+    "tsup": "^7.2.0",
+    "typescript": "^5.4.0"
+  }
+}

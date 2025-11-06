@@ -1,0 +1,20 @@
+# Extension Workspace
+
+## Setup
+```bash
+cd extension
+npm install
+```
+
+## Development
+- `npm run watch` – generate placeholder icons, bundle background/content scripts, and rebuild on change.
+- `npm run build` – production build into `dist/`.
+- `npm run typecheck` – run the TypeScript compiler without emitting files.
+- `npm run lint` – lint the TypeScript sources with ESLint.
+
+## Loading in Chrome
+1. Run `npm run build`.
+2. Open `chrome://extensions` in Chrome 123+.
+3. Enable **Developer mode** in the top-right.
+4. Click **Load unpacked** and select the `extension/` directory.
+5. Confirm the background service worker logs appear in the extensions page console and that the content script logs on any visited page.

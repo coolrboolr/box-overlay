@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "LLM Overlay Dev",
+  "version": "0.1.0",
+  "description": "Local summarization overlay development build.",
+  "minimum_chrome_version": "123",
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "LLM Overlay Dev"
+  },
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://localhost:5000/*"
+  ],
+  "commands": {
+    "toggle-overlays": {
+      "suggested_key": {
+        "default": "Alt+L"
+      },
+      "description": "Toggle analysis overlays"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "dist/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "dist/icons/icon-16.png",
+    "48": "dist/icons/icon-48.png",
+    "128": "dist/icons/icon-128.png"
+  }
+}
