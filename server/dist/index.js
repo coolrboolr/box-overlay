@@ -6,18 +6,22 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const cors_1 = __importDefault(require("cors"));
 const express_1 = __importDefault(require("express"));
 const schema_1 = require("./schema");
-const ollama_1 = require("./ollama");
+const ollamaClient_1 = require("./ollamaClient");
 const env_1 = require("./env");
 const HOST = "127.0.0.1";
 const JSON_LIMIT = "2mb";
 const app = (0, express_1.default)();
 app.use(express_1.default.json({ limit: JSON_LIMIT }));
 app.use(buildCorsMiddleware());
+app.get("/health", (_req, res) => {
+    res.json({ status: "ok", model: env_1.env.OLLAMA_MODEL, mock: env_1.env.MOCK_OLLAMA });
+});
 app.post("/api/analyze", async (req, res) => {
     const parseResult = schema_1.ItemAnalysisRequestSchema.safeParse(req.body);
     if (!parseResult.success) {
         const errorPayload = schema_1.ErrorResponseSchema.parse({
-            error: "Invalid request payload",
+            error: "VALIDATION_ERROR",
+            message: "Invalid analyze request payload",
             details: parseResult.error.format()
         });
         return res.status(400).json(errorPayload);
@@ -33,7 +37,8 @@ app.post("/api/analyze", async (req, res) => {
             error: error instanceof Error ? error.message : String(error)
         });
         const errorPayload = schema_1.ErrorResponseSchema.parse({
-            error: "Failed to analyze content",
+            error: "INTERNAL_ERROR",
+            message: "Failed to analyze content",
             details: process.env.NODE_ENV === "development" ? formatErrorDetails(error) : undefined
         });
         return res.status(500).json(errorPayload);
@@ -42,7 +47,8 @@ app.post("/api/analyze", async (req, res) => {
 const errorHandler = (err, _req, res, _next) => {
     console.error("[server] unhandled error", err);
     const errorPayload = schema_1.ErrorResponseSchema.parse({
-        error: "Internal server error",
+        error: "INTERNAL_ERROR",
+        message: "Internal server error",
         details: process.env.NODE_ENV === "development" ? formatErrorDetails(err) : undefined
     });
     res.status(500).json(errorPayload);
@@ -58,7 +64,7 @@ process.on("SIGINT", () => {
     });
 });
 async function analyzeRequest(payload) {
-    const response = await (0, ollama_1.callOllama)(payload, {
+    const response = await (0, ollamaClient_1.callOllama)(payload, {
         model: env_1.env.OLLAMA_MODEL,
         baseUrl: env_1.env.OLLAMA_BASE_URL,
         timeoutMs: env_1.env.OLLAMA_TIMEOUT_MS,

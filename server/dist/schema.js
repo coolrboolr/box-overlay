@@ -15,6 +15,7 @@ exports.ItemAnalysisResponseSchema = zod_1.z.object({
 });
 exports.ErrorResponseSchema = zod_1.z.object({
     error: zod_1.z.string(),
+    message: zod_1.z.string(),
     details: zod_1.z.unknown().optional()
 });
 //# sourceMappingURL=schema.js.map

@@ -19,6 +19,7 @@ export type ItemAnalysisResponse = z.infer<typeof ItemAnalysisResponseSchema>;
 
 export const ErrorResponseSchema = z.object({
   error: z.string(),
+  message: z.string(),
   details: z.unknown().optional()
 });
 

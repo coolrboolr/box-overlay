@@ -207,6 +207,20 @@ function normalizeAnalysisResponse(data: unknown): ItemAnalysisResponse {
   };
 }
 
+function isValidRequest(payload: unknown): payload is ItemAnalysisRequest {
+  if (typeof payload !== "object" || payload === null) {
+    return false;
+  }
+  const record = payload as Record<string, unknown>;
+  return (
+    typeof record.id === "string" &&
+    record.id.length > 0 &&
+    typeof record.text === "string" &&
+    record.text.length > 0 &&
+    (record.image === undefined || typeof record.image === "string")
+  );
+}
+
 function sendResultToTab(
   tabId: number,
   frameId: number | undefined,
@@ -240,6 +254,11 @@ chrome.runtime.onMessage.addListener((rawMessage, sender) => {
   const tabId = sender.tab?.id;
   if (tabId == null) {
     logError("Received ANALYZE_REQUEST without tabId");
+    return;
+  }
+
+  if (!isValidRequest(message.payload)) {
+    logError("Received invalid ANALYZE_REQUEST payload", message.payload);
     return;
   }
 

@@ -1,6 +1,7 @@
+const OVERLAY_DATA_ID_ATTR = "data-llm-overlay-id";
+
 let nodeToId = new WeakMap<Element, string>();
 let processedNodes = new WeakSet<Element>();
-
 let idCounter = 0;
 
 function nextId(): string {
@@ -9,12 +10,21 @@ function nextId(): string {
 }
 
 export function getOrCreateItemId(node: Element): string {
+  const existingAttr = node.getAttribute(OVERLAY_DATA_ID_ATTR);
+  if (existingAttr) {
+    nodeToId.set(node, existingAttr);
+    return existingAttr;
+  }
+
   const existing = nodeToId.get(node);
   if (existing) {
+    node.setAttribute(OVERLAY_DATA_ID_ATTR, existing);
     return existing;
   }
+
   const id = nextId();
   nodeToId.set(node, id);
+  node.setAttribute(OVERLAY_DATA_ID_ATTR, id);
   return id;
 }
 

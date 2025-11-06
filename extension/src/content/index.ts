@@ -1,5 +1,5 @@
-import { extractItems } from "./extract";
 import { CANDIDATE_SELECTORS } from "./domSelectors";
+import { initializeScanner } from "./domScan";
 import { getOrCreateItemId } from "./state";
 import {
   clearDismissed,
@@ -17,7 +17,14 @@ import type {
   RuntimeMessage
 } from "../types/messages";
 
-const RESCAN_INTERVAL_MS = 5000;
+declare const process: {
+  env?: {
+    NODE_ENV?: string;
+  };
+};
+
+const isDev = typeof process !== "undefined" && process.env?.NODE_ENV !== "production";
+
 let overlaysEnabled = true;
 
 function sendAnalyzeRequest(item: ItemAnalysisRequest): void {
@@ -28,7 +35,7 @@ function sendAnalyzeRequest(item: ItemAnalysisRequest): void {
 
   chrome.runtime.sendMessage(message, () => {
     const err = chrome.runtime.lastError;
-    if (err) {
+    if (err && isDev) {
       console.debug("[content] sendMessage error (background pending?):", err.message);
     }
   });
@@ -38,11 +45,13 @@ function isRuntimeMessage(message: unknown): message is RuntimeMessage {
   if (typeof message !== "object" || message === null) {
     return false;
   }
-  const candidate = message as { type?: unknown; payload?: unknown };
-  if (candidate.type === "ANALYZE_REQUEST" || candidate.type === "ANALYZE_RESULT") {
-    return true;
-  }
-  return false;
+  const candidate = message as { type?: unknown };
+  return (
+    candidate.type === "ANALYZE_REQUEST" ||
+    candidate.type === "ANALYZE_RESULT" ||
+    candidate.type === "ANALYZE_ERROR" ||
+    candidate.type === "TOGGLE_OVERLAYS"
+  );
 }
 
 function findTargetElementById(id: string): Element | null {
@@ -79,7 +88,9 @@ async function handleAnalyzeResult(payload: ItemAnalysisResponse): Promise<void>
   const target = existing?.target ?? findTargetElementById(payload.id);
 
   if (!target) {
-    console.debug("[content] no target found for overlay", payload.id);
+    if (isDev) {
+      console.debug("[content] no target found for overlay", payload.id);
+    }
     return;
   }
 
@@ -119,51 +130,43 @@ async function handleToggleOverlays(): Promise<void> {
     const shouldShow = overlaysEnabled && !record.dismissed;
     record.container.classList.toggle("llm-overlay-hidden", !shouldShow);
   });
-  console.debug("[content] overlays", overlaysEnabled ? "enabled" : "disabled");
-}
-
-async function scanAndSend(): Promise<void> {
-  try {
-    const items = await extractItems(document);
-    if (items.length > 0) {
-      console.debug("[content] extracted items", items);
-      items.forEach(sendAnalyzeRequest);
-    }
-  } catch (error) {
-    console.error("[content] extract/send failed", error);
+  if (isDev) {
+    console.debug("[content] overlays", overlaysEnabled ? "enabled" : "disabled");
   }
 }
 
-// Initial scan on load.
-void scanAndSend();
-
-// Periodic rescan; later specs may swap this for a MutationObserver.
-setInterval(() => {
-  void scanAndSend();
-}, RESCAN_INTERVAL_MS);
-
 void (async () => {
   overlaysEnabled = await getGlobalEnabled();
-  if (!overlaysEnabled) {
+  if (!overlaysEnabled && isDev) {
     console.debug("[content] overlays start disabled");
   }
 })();
 
-chrome.runtime.onMessage.addListener((message) => {
-  if (
-    message &&
-    typeof message === "object" &&
-    (message as { type?: unknown }).type === "TOGGLE_OVERLAYS"
-  ) {
-    void handleToggleOverlays();
-    return;
+initializeScanner((batch) => {
+  if (isDev && batch.length) {
+    console.debug("[content] extracted batch", batch);
   }
+  batch.forEach(sendAnalyzeRequest);
+});
 
+chrome.runtime.onMessage.addListener((message) => {
   if (!isRuntimeMessage(message)) {
     return;
   }
 
-  if (message.type === "ANALYZE_RESULT") {
-    void handleAnalyzeResult(message.payload);
+  switch (message.type) {
+    case "TOGGLE_OVERLAYS":
+      void handleToggleOverlays();
+      break;
+    case "ANALYZE_RESULT":
+      void handleAnalyzeResult(message.payload);
+      break;
+    case "ANALYZE_ERROR":
+      if (isDev) {
+        console.debug("[content] analyze error", message.payload);
+      }
+      break;
+    default:
+      break;
   }
 });

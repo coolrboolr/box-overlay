@@ -8,7 +8,7 @@ import {
   ItemAnalysisResponseSchema,
   type ItemAnalysisRequest
 } from "./schema";
-import { callOllama } from "./ollama";
+import { callOllama } from "./ollamaClient";
 import { env } from "./env";
 
 const HOST = "127.0.0.1";
@@ -19,11 +19,16 @@ const app = express();
 app.use(express.json({ limit: JSON_LIMIT }));
 app.use(buildCorsMiddleware());
 
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", model: env.OLLAMA_MODEL, mock: env.MOCK_OLLAMA });
+});
+
 app.post("/api/analyze", async (req, res) => {
   const parseResult = ItemAnalysisRequestSchema.safeParse(req.body);
   if (!parseResult.success) {
     const errorPayload = ErrorResponseSchema.parse({
-      error: "Invalid request payload",
+      error: "VALIDATION_ERROR",
+      message: "Invalid analyze request payload",
       details: parseResult.error.format()
     });
     return res.status(400).json(errorPayload);
@@ -39,7 +44,8 @@ app.post("/api/analyze", async (req, res) => {
       error: error instanceof Error ? error.message : String(error)
     });
     const errorPayload = ErrorResponseSchema.parse({
-      error: "Failed to analyze content",
+      error: "INTERNAL_ERROR",
+      message: "Failed to analyze content",
       details: process.env.NODE_ENV === "development" ? formatErrorDetails(error) : undefined
     });
     return res.status(500).json(errorPayload);
@@ -49,7 +55,8 @@ app.post("/api/analyze", async (req, res) => {
 const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   console.error("[server] unhandled error", err);
   const errorPayload = ErrorResponseSchema.parse({
-    error: "Internal server error",
+    error: "INTERNAL_ERROR",
+    message: "Internal server error",
     details: process.env.NODE_ENV === "development" ? formatErrorDetails(err) : undefined
   });
   res.status(500).json(errorPayload);

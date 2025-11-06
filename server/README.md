@@ -21,10 +21,11 @@ Update `.env` with your extension ID (for CORS) and Ollama settings if needed.
 
 ## API
 
-```
-POST /api/analyze
-Content-Type: application/json
-```
+
+### Endpoints
+
+- `GET /health` – returns `{ status, model, mock }` for monitoring.
+- `POST /api/analyze` – accepts the summarized payload used by the extension.
 
 Example:
 
