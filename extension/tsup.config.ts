@@ -21,6 +21,11 @@ export default defineConfig((options) => ({
   treeshake: true,
   onSuccess: "node ./scripts/copy-static.mjs",
   watch: options.watch ? ["src/**/*", `${staticDir}/**/*`] : undefined,
+  define: {
+    "process.env.NODE_ENV": JSON.stringify(
+      process.env.NODE_ENV ?? (options.watch ? "development" : "production")
+    )
+  },
   esbuildOptions(options) {
     options.banner = options.banner || {};
     options.banner.js = `"use strict";`;

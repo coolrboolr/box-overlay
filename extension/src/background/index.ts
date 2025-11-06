@@ -26,10 +26,13 @@ function logError(...args: unknown[]): void {
 class BackendRequestError extends Error {
   public readonly retryable: boolean;
 
-  constructor(message: string, retryable: boolean, options?: ErrorOptions) {
-    super(message, options);
+  constructor(message: string, retryable: boolean, cause?: unknown) {
+    super(message);
     this.name = "BackendRequestError";
     this.retryable = retryable;
+    if (cause !== undefined) {
+      (this as Error & { cause?: unknown }).cause = cause;
+    }
   }
 }
 
@@ -150,9 +153,7 @@ async function sendToBackend(request: ItemAnalysisRequest): Promise<ItemAnalysis
     try {
       data = await response.json();
     } catch (parseError) {
-      throw new BackendRequestError("Failed to parse backend response", false, {
-        cause: parseError
-      });
+      throw new BackendRequestError("Failed to parse backend response", false, parseError);
     }
 
     return normalizeAnalysisResponse(data);
@@ -162,11 +163,11 @@ async function sendToBackend(request: ItemAnalysisRequest): Promise<ItemAnalysis
     }
 
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new BackendRequestError("Backend request timed out", true, { cause: error });
+      throw new BackendRequestError("Backend request timed out", true, error);
     }
 
     const message = error instanceof Error ? error.message : String(error);
-    throw new BackendRequestError(message, true, { cause: error });
+    throw new BackendRequestError(message, true, error);
   } finally {
     clearTimeout(timeoutId);
   }
