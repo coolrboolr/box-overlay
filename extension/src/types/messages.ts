@@ -11,6 +11,14 @@ export interface ItemAnalysisResponse {
   is_ad: boolean;
 }
 
+export interface AnalyzeError {
+  id: string;
+  error: string;
+  retryable: boolean;
+}
+
 export type RuntimeMessage =
   | { type: "ANALYZE_REQUEST"; payload: ItemAnalysisRequest }
-  | { type: "ANALYZE_RESULT"; payload: ItemAnalysisResponse };
+  | { type: "ANALYZE_RESULT"; payload: ItemAnalysisResponse }
+  | { type: "ANALYZE_ERROR"; payload: AnalyzeError }
+  | { type: "TOGGLE_OVERLAYS" };
