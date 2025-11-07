@@ -26,13 +26,24 @@ const EnvSchema = zod_1.z.object({
     MOCK_OLLAMA_FALLBACK: zod_1.z
         .string()
         .optional()
-        .transform((value) => value === "true")
+        .transform((value) => value === "true"),
+    ENABLE_DEV_EXTENSION_REGISTRATION: zod_1.z
+        .string()
+        .optional()
+        .transform((value) => {
+        if (value === undefined) {
+            return true;
+        }
+        const normalized = value.trim().toLowerCase();
+        return normalized === "1" || normalized === "true";
+    })
 });
 const parsed = EnvSchema.parse(process.env);
 exports.env = {
     ...parsed,
     allowedOrigins: parsed.ALLOWED_EXTENSION_IDS.length === 0
         ? null
-        : new Set(parsed.ALLOWED_EXTENSION_IDS.map((id) => `chrome-extension://${id}`))
+        : new Set(parsed.ALLOWED_EXTENSION_IDS.map((id) => `chrome-extension://${id.toLowerCase()}`)),
+    enableDevExtensionRegistration: parsed.ENABLE_DEV_EXTENSION_REGISTRATION
 };
 //# sourceMappingURL=env.js.map

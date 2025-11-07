@@ -27,6 +27,10 @@ const isDev = typeof process !== "undefined" && process.env?.NODE_ENV !== "produ
 
 let overlaysEnabled = true;
 
+if (isDev) {
+  console.debug("[content] loaded", window.location.href);
+}
+
 function shouldIgnoreKeyEvent(event: KeyboardEvent): boolean {
   const target = event.target as HTMLElement | null;
   if (!target) {
@@ -43,6 +47,13 @@ function shouldIgnoreKeyEvent(event: KeyboardEvent): boolean {
 }
 
 function sendAnalyzeRequest(item: ItemAnalysisRequest): void {
+  if (isDev) {
+    console.debug("[content] send analyze", {
+      id: item.id,
+      textLength: item.text.length,
+      hasImage: Boolean(item.image)
+    });
+  }
   const message: RuntimeMessage = {
     type: "ANALYZE_REQUEST",
     payload: item
@@ -109,6 +120,13 @@ async function handleAnalyzeResult(payload: ItemAnalysisResponse): Promise<void>
     return;
   }
 
+  if (isDev) {
+    console.debug("[content] handle result", {
+      id: payload.id,
+      hasExisting: Boolean(existing)
+    });
+  }
+
   const lastPayload = getLastPayload(payload.id);
   const payloadChanged = hasPayloadChanged(lastPayload, payload);
 
@@ -163,6 +181,10 @@ void (async () => {
     overlaysEnabled = true;
   }
 })();
+
+if (isDev) {
+  console.debug("[content] initializeScanner start");
+}
 
 initializeScanner((batch) => {
   if (isDev && batch.length) {

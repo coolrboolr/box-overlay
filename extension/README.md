@@ -18,3 +18,13 @@ npm install
 3. Enable **Developer mode** in the top-right.
 4. Click **Load unpacked** and select the `extension/` directory.
 5. Confirm the background service worker logs appear in the extensions page console and that the content script logs on any visited page.
+
+## Debugging tips
+- Use the page DevTools console to verify `[content]` logs – the first log on
+  each page will report the URL, then every DOM scan batch and `ANALYZE_REQUEST`
+  that goes out.
+- Open the extension's service worker console from `chrome://extensions` to see
+  `[background]` logs. You should see origin-registration messages followed by
+  one log per `/api/analyze` request/response pair.
+- Option/Alt+L toggles overlays on the active page. The hotkey is blocked while
+  focus is inside text inputs, selects, or editable regions.

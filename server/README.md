@@ -10,7 +10,10 @@ npm install
 cp .env.example .env
 ```
 
-Update `.env` with your extension ID (for CORS) and Ollama settings if needed.
+Update `.env` with your extension ID (for CORS) and Ollama settings if needed. During
+local development you can leave `ALLOWED_EXTENSION_IDS` blank and rely on
+`ENABLE_DEV_EXTENSION_REGISTRATION=true` (default) so the extension can register
+itself automatically.
 
 ## Development
 
@@ -26,6 +29,11 @@ Update `.env` with your extension ID (for CORS) and Ollama settings if needed.
 
 - `GET /health` – returns `{ status, model, mock }` for monitoring.
 - `POST /api/analyze` – accepts the summarized payload used by the extension.
+- `POST /api/dev/register-extension-origin?id=<extensionId>` – (dev only) allows
+  an unpacked extension to register its Chrome origin dynamically so CORS checks
+  pass. The background service worker calls this endpoint automatically using a
+  `no-cors` request; no manual action is required unless you disable
+  `ENABLE_DEV_EXTENSION_REGISTRATION`.
 
 Example:
 

@@ -15,11 +15,17 @@ const HOST = "127.0.0.1";
 const JSON_LIMIT = "2mb";
 
 const app = express();
+const dynamicExtensionOrigins = new Set<string>();
 
 const defaultTags = ["technology", "finance", "sports", "lifestyle", "entertainment"];
 
 app.use(express.json({ limit: JSON_LIMIT }));
-app.use(buildCorsMiddleware());
+
+if (env.enableDevExtensionRegistration) {
+  app.post("/api/dev/register-extension-origin", registerExtensionOriginHandler);
+}
+
+app.use(buildCorsMiddleware(dynamicExtensionOrigins));
 
 const healthHandler = (_req: express.Request, res: express.Response) => {
   res.json({ status: "ok", model: env.OLLAMA_MODEL, mock: env.MOCK_OLLAMA });
@@ -45,6 +51,11 @@ app.post("/api/analyze", async (req, res) => {
 
   const payload = parseResult.data;
   try {
+    console.log("[server] analyze request", {
+      id: payload.id,
+      textLength: payload.text.length,
+      hasImage: Boolean(payload.image)
+    });
     const result = await analyzeRequest(payload);
     return res.json(result);
   } catch (error) {
@@ -94,7 +105,7 @@ async function analyzeRequest(payload: ItemAnalysisRequest) {
   return ItemAnalysisResponseSchema.parse(response);
 }
 
-function buildCorsMiddleware() {
+function buildCorsMiddleware(dynamicOrigins: Set<string>) {
   return cors({
     origin(origin, callback) {
       if (!origin) {
@@ -104,13 +115,70 @@ function buildCorsMiddleware() {
         return callback(null, true);
       }
 
-      if (env.allowedOrigins === null || env.allowedOrigins.has(origin)) {
+      if (
+        env.allowedOrigins === null ||
+        env.allowedOrigins.has(origin) ||
+        dynamicOrigins.has(origin)
+      ) {
         return callback(null, true);
       }
 
+      console.warn("[server] blocked CORS origin", origin);
       return callback(new Error("Not allowed by CORS"));
     }
   });
+}
+
+function registerExtensionOriginHandler(
+  req: express.Request,
+  res: express.Response
+): express.Response | void {
+  if (!env.enableDevExtensionRegistration) {
+    return res.status(404).end();
+  }
+
+  const requestedOrigin = coerceExtensionOrigin(req);
+  if (!requestedOrigin) {
+    return res.status(400).json({ error: "INVALID_EXTENSION_ORIGIN" });
+  }
+
+  if (env.allowedOrigins?.has(requestedOrigin)) {
+    return res.status(204).end();
+  }
+
+  if (!dynamicExtensionOrigins.has(requestedOrigin)) {
+    dynamicExtensionOrigins.add(requestedOrigin);
+    console.log("[server] registered dev extension origin", requestedOrigin);
+  }
+
+  return res.status(204).end();
+}
+
+function coerceExtensionOrigin(req: express.Request): string | null {
+  const queryValue = req.query.id;
+  const fromQuery = Array.isArray(queryValue) ? queryValue[0] : queryValue;
+  const normalizedFromQuery = normalizeExtensionId(typeof fromQuery === "string" ? fromQuery : null);
+  if (normalizedFromQuery) {
+    return normalizedFromQuery;
+  }
+
+  const headerOrigin = typeof req.headers.origin === "string" ? req.headers.origin : null;
+  if (headerOrigin?.startsWith("chrome-extension://")) {
+    return headerOrigin.toLowerCase();
+  }
+
+  return null;
+}
+
+function normalizeExtensionId(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim().toLowerCase();
+  if (/^[a-p]{32}$/.test(trimmed)) {
+    return `chrome-extension://${trimmed}`;
+  }
+  return null;
 }
 
 function formatErrorDetails(error: unknown): unknown {

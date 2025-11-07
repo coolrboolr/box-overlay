@@ -43,7 +43,9 @@ type QueueItem = {
   attempt: number;
 };
 
-const ANALYZE_ENDPOINT = "http://127.0.0.1:5000/api/analyze";
+const API_BASE_URL = "http://127.0.0.1:5000";
+const ANALYZE_ENDPOINT = `${API_BASE_URL}/api/analyze`;
+const REGISTER_ORIGIN_ENDPOINT = `${API_BASE_URL}/api/dev/register-extension-origin`;
 const REQUEST_TIMEOUT_MS = 25_000;
 const MAX_CONCURRENCY = 3;
 const MAX_RETRIES = 2;
@@ -51,6 +53,8 @@ const BASE_BACKOFF_MS = 500;
 
 const queue: QueueItem[] = [];
 let pendingCount = 0;
+let devOriginRegistered = false;
+let registerOriginPromise: Promise<void> | null = null;
 
 function enqueueJob(item: QueueItem): void {
   queue.push(item);
@@ -135,18 +139,41 @@ async function sendToBackend(request: ItemAnalysisRequest): Promise<ItemAnalysis
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const response = await fetch(ANALYZE_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(request),
-      signal: controller.signal
-    });
+    await ensureDevOriginRegistration();
+
+    if (isDev) {
+      debug("dispatching backend request", {
+        id: request.id,
+        textLength: request.text.length,
+        hasImage: Boolean(request.image)
+      });
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(ANALYZE_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(request),
+        signal: controller.signal
+      });
+    } catch (networkError) {
+      devOriginRegistered = false;
+      throw networkError;
+    }
 
     if (!response.ok) {
       const retryable = response.status >= 500 || response.status === 429;
       throw new BackendRequestError(`Backend responded with HTTP ${response.status}`, retryable);
+    }
+
+    if (isDev) {
+      debug("backend response ok", {
+        id: request.id,
+        status: response.status
+      });
     }
 
     let data: unknown;
@@ -207,6 +234,54 @@ function normalizeAnalysisResponse(data: unknown): ItemAnalysisResponse {
   };
 }
 
+function getExtensionId(): string | null {
+  try {
+    return chrome.runtime.id ?? null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function ensureDevOriginRegistration(): Promise<void> {
+  if (devOriginRegistered) {
+    return;
+  }
+
+  if (registerOriginPromise) {
+    return registerOriginPromise;
+  }
+
+  const extensionId = getExtensionId();
+  if (!extensionId) {
+    devOriginRegistered = true;
+    return;
+  }
+
+  const url = `${REGISTER_ORIGIN_ENDPOINT}?id=${encodeURIComponent(extensionId)}`;
+  registerOriginPromise = fetch(url, {
+    method: "POST",
+    mode: "no-cors",
+    keepalive: true
+  })
+    .then(() => {
+      devOriginRegistered = true;
+      if (isDev) {
+        debug("requested dev origin registration", extensionId);
+      }
+    })
+    .catch((error) => {
+      devOriginRegistered = false;
+      if (isDev) {
+        debug("dev origin registration failed", error);
+      }
+    })
+    .finally(() => {
+      registerOriginPromise = null;
+    });
+
+  return registerOriginPromise;
+}
+
 function isValidRequest(payload: unknown): payload is ItemAnalysisRequest {
   if (typeof payload !== "object" || payload === null) {
     return false;
@@ -262,6 +337,14 @@ chrome.runtime.onMessage.addListener((rawMessage, sender) => {
     return;
   }
 
+  if (isDev) {
+    debug("received ANALYZE_REQUEST", {
+      id: message.payload.id,
+      tabId,
+      frameId: sender.frameId
+    });
+  }
+
   enqueueJob({
     request: message.payload,
     tabId,
@@ -303,3 +386,4 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 debug("service worker initialized");
+void ensureDevOriginRegistration();
