@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "fs/promises";
 import { resolve } from "path";
 
 const staticDir = resolve(new URL("..", import.meta.url).pathname, "static");
+const iconsDir = resolve(staticDir, "icons");
 
 const icons = [
   {
@@ -19,11 +20,11 @@ const icons = [
 ];
 
 const run = async () => {
-  await mkdir(staticDir, { recursive: true });
+  await mkdir(iconsDir, { recursive: true });
   await Promise.all(
     icons.map(async ({ size, data }) => {
       const buffer = Buffer.from(data, "base64");
-      const file = resolve(staticDir, `icon-${size}.png`);
+      const file = resolve(iconsDir, `icon-${size}.png`);
       await writeFile(file, buffer);
     })
   );

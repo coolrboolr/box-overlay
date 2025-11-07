@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>LLM Overlay Harness</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="../../dist/overlay.css" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        --panel-bg: rgba(15, 23, 42, 0.08);
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f3f4f6;
+        color: #0f172a;
+        min-height: 100vh;
+      }
+      h1 {
+        margin-top: 0;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 16px;
+        margin-top: 24px;
+      }
+      .controls,
+      .config-panel {
+        background: #fff;
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.15);
+      }
+      .controls button,
+      .config-panel button,
+      .config-panel input,
+      .controls select {
+        font: inherit;
+      }
+      .controls button {
+        padding: 8px 14px;
+        border-radius: 999px;
+        border: none;
+        cursor: pointer;
+        background: #0f172a;
+        color: #fff;
+        font-weight: 600;
+      }
+      .controls button.secondary {
+        background: #e5e7eb;
+        color: #111827;
+      }
+      .controls button + button {
+        margin-left: 12px;
+      }
+      .feed {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 20px;
+        margin-top: 24px;
+      }
+      .card {
+        position: relative;
+        padding: 16px;
+        border-radius: 18px;
+        background: #fff;
+        box-shadow: 0 6px 20px rgba(15, 23, 42, 0.1);
+        min-height: 180px;
+      }
+      .card img {
+        width: 100%;
+        border-radius: 12px;
+        margin-bottom: 12px;
+      }
+      .card p {
+        margin: 0;
+        line-height: 1.4;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        background: rgba(59, 130, 246, 0.15);
+        color: #1d4ed8;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      fieldset {
+        border: none;
+        padding: 0;
+        margin: 0 0 16px;
+      }
+      fieldset:last-of-type {
+        margin-bottom: 0;
+      }
+      .config-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      label {
+        font-weight: 600;
+      }
+      input[type="number"] {
+        width: 80px;
+        padding: 4px 8px;
+        border-radius: 6px;
+        border: 1px solid #cbd5f5;
+      }
+      .hint {
+        font-size: 13px;
+        color: #4b5563;
+      }
+      .instructions {
+        margin-top: 24px;
+        padding: 16px;
+        border-radius: 12px;
+        background: #fff;
+        box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+      }
+      .instructions ul {
+        padding-left: 20px;
+        margin: 8px 0 0;
+      }
+      .instructions li {
+        margin-bottom: 6px;
+      }
+      .hud-note {
+        font-size: 12px;
+        color: #6b7280;
+        margin-top: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Overlay Harness</h1>
+      <p class="hint">
+        Run <code>npm run watch</code> before using the harness so <code>dist/content.js</code> stays fresh.
+      </p>
+    </header>
+
+    <section class="controls">
+      <h2>Feed Controls</h2>
+      <div>
+        <button id="add-card">Add mock card</button>
+        <button id="remove-card" class="secondary">Remove last card</button>
+        <button id="rerender-card" class="secondary">Simulate re-render</button>
+        <button id="toggle-dock" class="secondary">Toggle dock (Alt+Shift+D)</button>
+        <button id="toggle-overlays" class="secondary">Toggle overlays (Alt+L)</button>
+      </div>
+    </section>
+
+    <section class="config-panel">
+      <h2>Mock Backend</h2>
+      <fieldset>
+        <label>
+          Response delay (ms)
+          <input type="number" id="response-delay" min="0" value="600" />
+        </label>
+      </fieldset>
+      <fieldset>
+        <label class="config-row">
+          <input type="checkbox" id="flag-ads" />
+          Mark every response as ad
+        </label>
+        <label class="config-row">
+          <input type="checkbox" id="next-error" />
+          Fail next request (simulates backend error)
+        </label>
+      </fieldset>
+      <fieldset>
+        <button id="clear-storage" class="secondary">Clear session storage</button>
+      </fieldset>
+      <p class="hud-note">
+        Placeholders appear immediately; summaries arrive after the mock delay above.
+      </p>
+    </section>
+
+    <section class="instructions">
+      <h2>QA Checklist</h2>
+      <ul>
+        <li>Verify placeholder cards show spinner + “Analyzing…”</li>
+        <li>Trigger retries by toggling “Fail next request” and confirming the inline retry button resubmits.</li>
+        <li>Use “Simulate re-render” to ensure overlays re-anchor after DOM churn.</li>
+        <li>Toggle dock mode and overlays via the buttons above (they fire the keyboard shortcuts).</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Mock Feed</h2>
+      <div id="feed" class="feed"></div>
+    </section>
+
+    <template id="card-template">
+      <article class="card" data-testid="feed-card">
+        <span class="badge">Sample profile</span>
+        <img src="https://picsum.photos/seed/overlay-harness/480/240" alt="Placeholder" />
+        <p>
+          Local artisans partner with eco-friendly suppliers to launch a limited drop featuring bold silhouettes
+          and recycled textures. Tap into the collection to see how each piece folds flat for easy packing.
+        </p>
+      </article>
+    </template>
+
+    <script>
+      (() => {
+        const storageState = new Map();
+        const messageListeners = new Set();
+
+        function normalizeKeys(input) {
+          if (Array.isArray(input)) {
+            return input;
+          }
+          if (typeof input === "string") {
+            return [input];
+          }
+          if (typeof input === "object" && input !== null) {
+            return Object.keys(input);
+          }
+          return [];
+        }
+
+        function emitMessage(message) {
+          messageListeners.forEach((listener) => {
+            try {
+              listener(message, { tab: { id: 0 } }, () => undefined);
+            } catch (error) {
+              console.error("[harness] listener error", error);
+            }
+          });
+        }
+
+        function summarizeText(text) {
+          const sentences = text.replace(/\s+/g, " ").split(/[.!?]/).map((chunk) => chunk.trim()).filter(Boolean);
+          const core = sentences[0] || text.slice(0, 120);
+          return core.length > 160 ? `${core.slice(0, 157)}…` : core;
+        }
+
+        function buildResponse(request) {
+          const summary = summarizeText(request.text);
+          const flagAds = document.querySelector("#flag-ads").checked;
+          const imageTag = request.sourceMeta?.profileName ? `${request.sourceMeta.profileName} pick` : undefined;
+          return {
+            schemaVersion: request.schemaVersion,
+            type: "ANALYZE_RESULT",
+            payload: {
+              id: request.id,
+              summary,
+              image_tag: imageTag,
+              is_ad: flagAds || /sponsored|deal/i.test(request.text)
+            }
+          };
+        }
+
+        function buildError(request) {
+          return {
+            schemaVersion: request.schemaVersion,
+            type: "ANALYZE_ERROR",
+            payload: {
+              id: request.id,
+              error: "Backend responded with HTTP 500",
+              retryable: true,
+              statusCode: 500,
+              details: "Harness forced failure"
+            }
+          };
+        }
+
+        function handleAnalyzeRequest(request) {
+          const delay = Number(document.querySelector("#response-delay").value) || 0;
+          const shouldFail = document.querySelector("#next-error").checked;
+          if (shouldFail) {
+            document.querySelector("#next-error").checked = false;
+          }
+          setTimeout(() => {
+            const message = shouldFail ? buildError(request) : buildResponse(request);
+            emitMessage(message);
+          }, delay);
+        }
+
+        const runtime = {
+          id: "overlay-harness",
+          lastError: undefined,
+          sendMessage(message, responseCallback) {
+            if (message?.type === "ANALYZE_REQUEST" && message.payload) {
+              handleAnalyzeRequest(message.payload);
+            }
+            responseCallback?.();
+          },
+          onMessage: {
+            addListener(fn) {
+              messageListeners.add(fn);
+            },
+            removeListener(fn) {
+              messageListeners.delete(fn);
+            }
+          }
+        };
+
+        const sessionStorageShim = {
+          get(keys, callback) {
+            const normalized = normalizeKeys(keys);
+            const result = {};
+            normalized.forEach((key) => {
+              if (storageState.has(key)) {
+                result[key] = storageState.get(key);
+              }
+            });
+            callback(result);
+          },
+          set(items, callback) {
+            Object.entries(items ?? {}).forEach(([key, value]) => {
+              storageState.set(key, value);
+            });
+            callback?.();
+          }
+        };
+
+        window.chrome = {
+          runtime,
+          storage: {
+            session: sessionStorageShim
+          }
+        };
+
+        document.querySelector("#clear-storage")?.addEventListener("click", () => {
+          storageState.clear();
+          console.info("[harness] session storage cleared");
+        });
+      })();
+    </script>
+
+    <script>
+      (() => {
+        const feed = document.getElementById("feed");
+        const template = document.getElementById("card-template");
+        let counter = 1;
+
+        function createCard() {
+          const clone = template.content.firstElementChild.cloneNode(true);
+          clone.dataset.cardId = `demo-${counter++}`;
+          clone.querySelector("p").textContent =
+            Math.random() > 0.5
+              ? "Bellroy restocks the Venture Sling with modular inserts and recycled textiles."
+              : "Drop.com teases a new keychron collaboration with hot-swappable switches and bold lighting.";
+          clone.querySelector("img").src = `https://picsum.photos/seed/overlay-harness-${counter}/480/240`;
+          return clone;
+        }
+
+        function addInitialCards() {
+          for (let i = 0; i < 4; i += 1) {
+            feed.appendChild(createCard());
+          }
+        }
+
+        document.getElementById("add-card")?.addEventListener("click", () => {
+          feed.prepend(createCard());
+        });
+
+        document.getElementById("remove-card")?.addEventListener("click", () => {
+          feed.lastElementChild?.remove();
+        });
+
+        document.getElementById("rerender-card")?.addEventListener("click", () => {
+          if (!feed.firstElementChild) {
+            return;
+          }
+          const node = feed.firstElementChild;
+          const clone = node.cloneNode(true);
+          node.remove();
+          setTimeout(() => {
+            feed.appendChild(clone);
+          }, 300);
+        });
+
+        document.getElementById("toggle-dock")?.addEventListener("click", () => {
+          const event = new KeyboardEvent("keydown", {
+            altKey: true,
+            shiftKey: true,
+            ctrlKey: false,
+            metaKey: false,
+            code: "KeyD"
+          });
+          window.dispatchEvent(event);
+        });
+
+        document.getElementById("toggle-overlays")?.addEventListener("click", () => {
+          const event = new KeyboardEvent("keydown", {
+            altKey: true,
+            shiftKey: false,
+            ctrlKey: false,
+            metaKey: false,
+            code: "KeyL"
+          });
+          window.dispatchEvent(event);
+        });
+
+        addInitialCards();
+      })();
+    </script>
+
+    <script type="module" src="../../dist/content.js"></script>
+  </body>
+</html>

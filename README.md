@@ -44,6 +44,7 @@ Manifest V3 Chrome extension plus a local Express proxy that summarizes DOM cont
 
 - Hotkeys: `Alt+L` toggles overlays, `Alt+Shift+D` docks cards, `Alt+Shift+L` exports telemetry JSON (dev builds only).
 - Telemetry HUD + CLI log tooling are documented in `docs/testing.md`, which now also covers backend smoke tests, cURL snippets, and troubleshooting tips.
+- Open the local harness at `chrome-extension://<id>/static/harness/index.html` (after running `npm run watch`) to exercise the content script without leaving localhost—use the panel controls to add/remove cards, fake backend failures, and toggle dock mode.
 - Run `npm test` inside each workspace for unit coverage (Vitest for extension code, TBD for the server as tests are added).
 
 ### Contributing

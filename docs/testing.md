@@ -68,6 +68,20 @@ These tools are dev-only (`isDev` builds). They never run in production bundles.
 - Build the extension with `ENABLE_BATCH=true` in the environment (e.g., `ENABLE_BATCH=true npm run watch`) so the background worker fans out through the batch endpoint. It auto-detects 404s and falls back to single-item mode if the backend is older.
 - Error payloads now include `statusCode` and optional `details`, so overlays display messages like “Backend responded with HTTP 400 (HTTP 400)” to simplify triage.
 
+## Local Harness
+
+1. Run `cd extension && npm run watch` so `dist/content.js` stays synced.
+2. Load the unpacked extension, then open `chrome-extension://<your-extension-id>/static/harness/index.html`.
+3. The harness auto-mounts the content script and mock backend. Use the buttons to:
+   - Add/remove feed cards and simulate React-style re-renders.
+   - Toggle dock mode / global overlays (fires the same keyboard shortcuts).
+   - Inject failures (“Fail next request”) and adjust the mock response delay.
+4. Recommended QA sweep:
+   - Confirm pending overlays show “Analyzing…” with spinner right after a card spawns.
+   - Toggle the failure checkbox and use the inline “Retry” button to ensure errors resubmit successfully.
+   - Re-render cards and verify overlays reattach without duplicate Analyze requests.
+   - Toggle dock mode to make sure the stack respects ordering and persists via session storage.
+
 ## Chrome Extension Workflow
 
 1. In a separate terminal, build/watch the extension:
