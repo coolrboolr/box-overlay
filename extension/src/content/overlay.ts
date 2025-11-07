@@ -8,6 +8,7 @@ import {
   updateOverlayRecord
 } from "./uiState";
 import { clearAnchor } from "./anchors";
+import { recordEvent } from "./logStore";
 
 export const OVERLAY_Z_INDEX = 2147483000;
 const DEFAULT_TAG_LABEL = "Uncategorized";
@@ -23,6 +24,16 @@ let overlayOrderCounter = 0;
 
 function shouldDock(): boolean {
   return document.body?.dataset.llmDock === "true";
+}
+
+function trackOverlaySuccess(
+  id: string,
+  nextStatus: OverlayStatus | undefined,
+  previousStatus?: OverlayStatus
+): void {
+  if (nextStatus === "resolved" && previousStatus !== "resolved") {
+    recordEvent("overlay-success", { id });
+  }
 }
 
 function applyDockState(wrapper: HTMLElement): void {
@@ -149,6 +160,7 @@ export function renderOverlay(
   options: OverlayRenderOptions = {}
 ): void {
   const existing = getOverlay(data.id);
+  const previousStatus = existing?.status;
   if (existing) {
     removeOverlay(data.id, { releaseAnchor: false });
   }
@@ -210,7 +222,9 @@ export function renderOverlay(
     onRetry: options.onRetry ?? null
   });
 
-  applyCardState(card, getOverlay(data.id));
+  const record = getOverlay(data.id);
+  applyCardState(card, record);
+  trackOverlaySuccess(data.id, record?.status, previousStatus);
 }
 
 export function updateOverlay(
@@ -218,6 +232,7 @@ export function updateOverlay(
   data: ItemAnalysisResponse,
   options: OverlayRenderOptions = {}
 ): void {
+  const previousStatus = getOverlay(id)?.status;
   const record = updateOverlayRecord(id, {
     data,
     status: options.status,
@@ -228,10 +243,10 @@ export function updateOverlay(
     return;
   }
   const card = record.container.querySelector<HTMLElement>(".llm-overlay-card");
-  if (!card) {
-    return;
+  if (card) {
+    applyCardState(card, record);
   }
-  applyCardState(card, record);
+  trackOverlaySuccess(id, record.status, previousStatus);
 }
 
 export function updateOverlayStatus(
@@ -239,6 +254,7 @@ export function updateOverlayStatus(
   status: OverlayStatus,
   extras: { errorMessage?: string; onRetry?: (() => void) | null } = {}
 ): void {
+  const previousStatus = getOverlay(id)?.status;
   const record = updateOverlayRecord(id, {
     status,
     errorMessage: extras.errorMessage,
@@ -248,10 +264,10 @@ export function updateOverlayStatus(
     return;
   }
   const card = record.container.querySelector<HTMLElement>(".llm-overlay-card");
-  if (!card) {
-    return;
+  if (card) {
+    applyCardState(card, record);
   }
-  applyCardState(card, record);
+  trackOverlaySuccess(id, record.status, previousStatus);
 }
 
 export function removeOverlay(id: string, options?: { releaseAnchor?: boolean }): void {

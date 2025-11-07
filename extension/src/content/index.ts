@@ -25,6 +25,8 @@ import type {
   RuntimeMessage
 } from "../types/messages";
 import { isDev } from "../shared/isDev";
+import { exportLogs, initTelemetryStore, recordEvent } from "./logStore";
+import { mountDebugHud, unmountDebugHud } from "./debugHud";
 
 const activeProfile = getActiveProfile();
 const candidateSelector = activeProfile.selectors.join(",");
@@ -45,6 +47,16 @@ function debug(...args: unknown[]): void {
 
 debug("loaded", window.location.href);
 
+if (isDev) {
+  initTelemetryStore();
+  mountDebugHud();
+  const teardownHud = () => {
+    unmountDebugHud();
+  };
+  window.addEventListener("pagehide", teardownHud);
+  window.addEventListener("beforeunload", teardownHud);
+}
+
 function shouldIgnoreKeyEvent(event: KeyboardEvent): boolean {
   const target = event.target as HTMLElement | null;
   if (!target) {
@@ -63,6 +75,11 @@ function shouldIgnoreKeyEvent(event: KeyboardEvent): boolean {
 function sendAnalyzeRequest(item: ItemAnalysisRequest): void {
   rememberRequestPayload(item.id, item);
   ensurePendingOverlay(item);
+  recordEvent("request", {
+    id: item.id,
+    textLength: item.text.length,
+    hasImage: Boolean(item.image)
+  });
   if (isDev) {
     debug("send analyze", {
       id: item.id,
@@ -191,6 +208,11 @@ async function handleAnalyzeResult(payload: ItemAnalysisResponse): Promise<void>
 }
 
 function handleAnalyzeError(payload: AnalyzeError): void {
+  recordEvent("error", {
+    id: payload.id,
+    retryable: payload.retryable,
+    message: payload.error
+  });
   const target = getAnchor(payload.id) ?? findTargetElementById(payload.id);
   if (!target) {
     if (isDev) {
@@ -210,6 +232,7 @@ function handleAnalyzeError(payload: AnalyzeError): void {
   const onRetry =
     payload.retryable && request
       ? () => {
+          recordEvent("retry", { reason: "user", id: payload.id });
           ensurePendingOverlay(request);
           sendAnalyzeRequest(request);
         }
@@ -233,6 +256,7 @@ async function recoverMissingOverlayTarget(id: string): Promise<void> {
 
   anchorRetryIds.add(id);
   anchorRetryCount += 1;
+  recordEvent("retry", { reason: "anchor", id });
   if (isDev) {
     debug("anchor retry", { id, count: anchorRetryCount });
   }
@@ -386,6 +410,17 @@ window.addEventListener("keydown", (event) => {
     }
     event.preventDefault();
     void handleDockToggle();
+    return;
+  }
+
+  const isExportShortcut =
+    isDev && event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey && event.code === "KeyL";
+  if (isExportShortcut) {
+    if (shouldIgnoreKeyEvent(event)) {
+      return;
+    }
+    event.preventDefault();
+    void exportLogs();
     return;
   }
 

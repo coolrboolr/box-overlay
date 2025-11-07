@@ -1,5 +1,6 @@
 import type { ItemAnalysisRequest } from "../types/messages";
 import { extractItems } from "./extract";
+import { recordEvent } from "./logStore";
 
 const SCAN_DEBOUNCE_MS = 250;
 const INITIAL_SCAN_DELAY_MS = 120;
@@ -40,6 +41,7 @@ async function runScan(callback: (batch: ItemAnalysisRequest[]) => void): Promis
   scheduled = false;
   try {
     const items = await extractItems(document);
+    recordEvent("scan", { count: items.length });
     if (!items.length) {
       return;
     }
