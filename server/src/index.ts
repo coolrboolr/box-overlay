@@ -2,14 +2,11 @@ import cors from "cors";
 import express from "express";
 import type { ErrorRequestHandler } from "express";
 
-import {
-  ErrorResponseSchema,
-  ItemAnalysisRequestSchema,
-  ItemAnalysisResponseSchema,
-  type ItemAnalysisRequest
-} from "./schema";
-import { callOllama } from "./ollamaClient";
+import { ErrorResponseSchema, ItemAnalysisRequestSchema } from "./schema";
 import { env } from "./env";
+import { analyzeRequest } from "./analyzeService";
+import { createAnalyzeBatchRouter } from "./routes/analyzeBatch";
+import { formatErrorDetails } from "./utils/errors";
 
 const HOST = "127.0.0.1";
 const JSON_LIMIT = "2mb";
@@ -26,6 +23,10 @@ if (env.enableDevExtensionRegistration) {
 }
 
 app.use(buildCorsMiddleware(dynamicExtensionOrigins));
+
+if (env.enableBatchAnalyze) {
+  app.use(createAnalyzeBatchRouter());
+}
 
 const healthHandler = (_req: express.Request, res: express.Response) => {
   res.json({ status: "ok", model: env.OLLAMA_MODEL, mock: env.MOCK_OLLAMA });
@@ -94,16 +95,6 @@ process.on("SIGINT", () => {
     process.exit(0);
   });
 });
-
-async function analyzeRequest(payload: ItemAnalysisRequest) {
-  const response = await callOllama(payload, {
-    model: env.OLLAMA_MODEL,
-    baseUrl: env.OLLAMA_BASE_URL,
-    timeoutMs: env.OLLAMA_TIMEOUT_MS,
-    mock: env.MOCK_OLLAMA
-  });
-  return ItemAnalysisResponseSchema.parse(response);
-}
 
 function buildCorsMiddleware(dynamicOrigins: Set<string>) {
   return cors({
@@ -179,14 +170,4 @@ function normalizeExtensionId(value: string | null): string | null {
     return `chrome-extension://${trimmed}`;
   }
   return null;
-}
-
-function formatErrorDetails(error: unknown): unknown {
-  if (error instanceof Error) {
-    return {
-      message: error.message,
-      stack: error.stack
-    };
-  }
-  return error;
 }

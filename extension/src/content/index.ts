@@ -18,11 +18,12 @@ import {
 } from "./uiState";
 import { renderOverlay, removeOverlay, updateOverlay, updateOverlayStatus } from "./overlay";
 import { clearAnchor, getAnchor } from "./anchors";
-import type {
-  ItemAnalysisRequest,
-  ItemAnalysisResponse,
-  AnalyzeError,
-  RuntimeMessage
+import {
+  SCHEMA_VERSION,
+  type ItemAnalysisRequest,
+  type ItemAnalysisResponse,
+  type AnalyzeError,
+  type RuntimeMessage
 } from "../types/messages";
 import { isDev } from "../shared/isDev";
 import { exportLogs, initTelemetryStore, recordEvent } from "./logStore";
@@ -88,6 +89,7 @@ function sendAnalyzeRequest(item: ItemAnalysisRequest): void {
     });
   }
   const message: RuntimeMessage = {
+    schemaVersion: SCHEMA_VERSION,
     type: "ANALYZE_REQUEST",
     payload: item
   };
@@ -104,11 +106,15 @@ function isRuntimeMessage(message: unknown): message is RuntimeMessage {
   if (typeof message !== "object" || message === null) {
     return false;
   }
-  const candidate = message as { type?: unknown };
+  const candidate = message as { type?: unknown; schemaVersion?: unknown };
+  if (candidate.schemaVersion !== SCHEMA_VERSION) {
+    return false;
+  }
   return (
     candidate.type === "ANALYZE_REQUEST" ||
     candidate.type === "ANALYZE_RESULT" ||
     candidate.type === "ANALYZE_ERROR" ||
+    candidate.type === "ANALYZE_BATCH_RESULT" ||
     candidate.type === "TOGGLE_OVERLAYS"
   );
 }
@@ -224,7 +230,7 @@ function handleAnalyzeError(payload: AnalyzeError): void {
   const existing = getLastPayload(payload.id);
   const fallback: ItemAnalysisResponse = existing ?? {
     id: payload.id,
-    summary: payload.error,
+    summary: formatErrorMessage(payload),
     is_ad: false
   };
 
@@ -238,12 +244,25 @@ function handleAnalyzeError(payload: AnalyzeError): void {
         }
       : undefined;
 
+  const errorMessage = formatErrorMessage(payload);
+
   renderOverlay(target, fallback, {
     status: "error",
-    errorMessage: payload.error,
+    errorMessage,
     onRetry: onRetry ?? null
   });
   hideOverlayIfDisabled(payload.id);
+}
+
+function formatErrorMessage(payload: AnalyzeError): string {
+  let message = payload.error;
+  if (payload.statusCode) {
+    message = `${message} (HTTP ${payload.statusCode})`;
+  }
+  if (payload.details) {
+    message = `${message} – ${payload.details}`;
+  }
+  return message;
 }
 
 async function recoverMissingOverlayTarget(id: string): Promise<void> {
@@ -448,6 +467,11 @@ chrome.runtime.onMessage.addListener((message) => {
   switch (message.type) {
     case "TOGGLE_OVERLAYS":
       void handleToggleOverlays();
+      break;
+    case "ANALYZE_BATCH_RESULT":
+      if (isDev) {
+        debug("batch result summary", message.payload);
+      }
       break;
     case "ANALYZE_RESULT":
       void handleAnalyzeResult(message.payload);

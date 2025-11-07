@@ -61,6 +61,13 @@ These tools are dev-only (`isDev` builds). They never run in production bundles.
 - Alternatively, keep real calls enabled but set `MOCK_OLLAMA_FALLBACK=true` so the server retries once against Ollama and then falls back to the mock payload if the model responds with invalid JSON or times out.
 - Restart `npm run dev` after changing either flag; the new environment values are read on boot.
 
+## Batch Mode & Schema Versioning
+
+- The extension and backend both respect `SCHEMA_VERSION` (see `extension/src/types/messages.ts` and `server/src/schema.ts`). Keep the versions in sync whenever you evolve the message contract.
+- To enable batched HTTP calls, set `ENABLE_BATCH_ANALYZE=true` in `server/.env` and rebuild/restart the backend. This exposes `POST /api/analyze/batch` which processes up to four items per request.
+- Build the extension with `ENABLE_BATCH=true` in the environment (e.g., `ENABLE_BATCH=true npm run watch`) so the background worker fans out through the batch endpoint. It auto-detects 404s and falls back to single-item mode if the backend is older.
+- Error payloads now include `statusCode` and optional `details`, so overlays display messages like “Backend responded with HTTP 400 (HTTP 400)” to simplify triage.
+
 ## Chrome Extension Workflow
 
 1. In a separate terminal, build/watch the extension:

@@ -34,6 +34,16 @@ const EnvSchema = z.object({
       }
       const normalized = value.trim().toLowerCase();
       return normalized === "1" || normalized === "true";
+    }),
+  ENABLE_BATCH_ANALYZE: z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (value === undefined) {
+        return false;
+      }
+      const normalized = value.trim().toLowerCase();
+      return normalized === "1" || normalized === "true";
     })
 });
 
@@ -45,5 +55,6 @@ export const env = {
     parsed.ALLOWED_EXTENSION_IDS.length === 0
       ? null
       : new Set(parsed.ALLOWED_EXTENSION_IDS.map((id) => `chrome-extension://${id.toLowerCase()}`)),
-  enableDevExtensionRegistration: parsed.ENABLE_DEV_EXTENSION_REGISTRATION
+  enableDevExtensionRegistration: parsed.ENABLE_DEV_EXTENSION_REGISTRATION,
+  enableBatchAnalyze: parsed.ENABLE_BATCH_ANALYZE
 };

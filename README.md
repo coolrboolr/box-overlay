@@ -34,6 +34,12 @@ Manifest V3 Chrome extension plus a local Express proxy that summarizes DOM cont
 - `MOCK_OLLAMA=true` — always return canned responses (fast UI/dev loop).
 - `MOCK_OLLAMA_FALLBACK=true` — try the real model first, fall back to the mock payload if Ollama times out or emits invalid JSON (the server now retries once with a strict JSON reminder before giving up).
 
+### Optional Batch Mode
+
+- Backend: set `ENABLE_BATCH_ANALYZE=true` in `server/.env` and restart `npm run dev` to expose `POST /api/analyze/batch`.
+- Extension: build/watch with `ENABLE_BATCH=true` (e.g., `ENABLE_BATCH=true npm run watch`) so the background worker bundles up to four requests per HTTP call. It auto-detects 404s and reverts to single-item mode if the backend doesn’t support batching.
+- Both sides enforce `SCHEMA_VERSION` (defined in `extension/src/types/messages.ts` and `server/src/schema.ts`). Bump it intentionally when you change the request/response contract.
+
 ### Developer Ergonomics
 
 - Hotkeys: `Alt+L` toggles overlays, `Alt+Shift+D` docks cards, `Alt+Shift+L` exports telemetry JSON (dev builds only).

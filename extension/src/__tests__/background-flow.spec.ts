@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { SCHEMA_VERSION } from "../types/messages";
 
 function createChromeBackgroundMock() {
   const runtimeOnMessageAddListener = vi.fn();
@@ -79,8 +80,9 @@ describe("background pipeline", () => {
 
     const handled = onMessageHandler(
       {
+        schemaVersion: SCHEMA_VERSION,
         type: "ANALYZE_REQUEST",
-        payload: { id: "item-1", text: "Test article body" }
+        payload: { schemaVersion: SCHEMA_VERSION, id: "item-1", text: "Test article body" }
       },
       { tab: { id: 99 } } as chrome.runtime.MessageSender
     );
@@ -91,7 +93,11 @@ describe("background pipeline", () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(
         99,
-        { type: "ANALYZE_RESULT", payload: analyzeResponse },
+        {
+          schemaVersion: SCHEMA_VERSION,
+          type: "ANALYZE_RESULT",
+          payload: analyzeResponse
+        },
         expect.any(Function)
       );
     });

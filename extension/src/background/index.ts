@@ -1,11 +1,19 @@
 import type {
+  BatchAnalysisResponse,
+  BatchAnalysisResult,
   AnalyzeError,
   ItemAnalysisRequest,
   ItemAnalysisResponse,
   RuntimeMessage
 } from "../types/messages";
+import { SCHEMA_VERSION } from "../types/messages";
 import { isDev } from "../shared/isDev";
 
+declare const process: {
+  env?: {
+    ENABLE_BATCH?: string;
+  };
+};
 function debug(...args: unknown[]): void {
   if (isDev) {
     console.info("[background]", ...args);
@@ -18,13 +26,20 @@ function logError(...args: unknown[]): void {
 
 class BackendRequestError extends Error {
   public readonly retryable: boolean;
+  public readonly statusCode?: number;
+  public readonly details?: string;
 
-  constructor(message: string, retryable: boolean, cause?: unknown) {
+  constructor(
+    message: string,
+    options: { retryable: boolean; statusCode?: number; details?: string; cause?: unknown }
+  ) {
     super(message);
     this.name = "BackendRequestError";
-    this.retryable = retryable;
-    if (cause !== undefined) {
-      (this as Error & { cause?: unknown }).cause = cause;
+    this.retryable = options.retryable;
+    this.statusCode = options.statusCode;
+    this.details = options.details;
+    if (options.cause !== undefined) {
+      (this as Error & { cause?: unknown }).cause = options.cause;
     }
   }
 }
@@ -38,16 +53,21 @@ type QueueItem = {
 
 const API_BASE_URL = "http://127.0.0.1:5000";
 const ANALYZE_ENDPOINT = `${API_BASE_URL}/api/analyze`;
+const ANALYZE_BATCH_ENDPOINT = `${API_BASE_URL}/api/analyze/batch`;
 const REGISTER_ORIGIN_ENDPOINT = `${API_BASE_URL}/api/dev/register-extension-origin`;
 const REQUEST_TIMEOUT_MS = 25_000;
 const MAX_CONCURRENCY = 3;
 const MAX_RETRIES = 2;
 const BASE_BACKOFF_MS = 500;
+const MAX_BATCH_SIZE = 4;
+const ENABLE_BATCH_MODE =
+  typeof process !== "undefined" && process.env?.ENABLE_BATCH === "true";
 
 const queue: QueueItem[] = [];
 let pendingCount = 0;
 let devOriginRegistered = false;
 let registerOriginPromise: Promise<void> | null = null;
+let batchEndpointAvailable = ENABLE_BATCH_MODE;
 
 function enqueueJob(item: QueueItem): void {
   queue.push(item);
@@ -60,8 +80,13 @@ async function processQueue(): Promise<void> {
     return;
   }
 
-  const next = queue.shift();
-  if (!next) {
+  if (!queue.length) {
+    return;
+  }
+
+  const batchMode = shouldUseBatchProcessing();
+  const jobItems = batchMode ? dequeueBatchItems() : [queue.shift()!];
+  if (!jobItems.length) {
     return;
   }
 
@@ -69,9 +94,13 @@ async function processQueue(): Promise<void> {
 
   void (async () => {
     try {
-      await handleJob(next);
+      if (batchMode) {
+        await handleBatchJob(jobItems);
+      } else {
+        await handleJob(jobItems[0]);
+      }
     } catch (error) {
-      logError("handleJob threw unexpectedly", error);
+      logError("job handler threw unexpectedly", error);
     } finally {
       pendingCount -= 1;
       void processQueue();
@@ -79,14 +108,27 @@ async function processQueue(): Promise<void> {
   })();
 }
 
+function shouldUseBatchProcessing(): boolean {
+  return ENABLE_BATCH_MODE && batchEndpointAvailable;
+}
+
+function dequeueBatchItems(): QueueItem[] {
+  const items: QueueItem[] = [];
+  const targetSize = Math.min(MAX_BATCH_SIZE, Math.max(1, queue.length));
+  while (items.length < targetSize && queue.length > 0) {
+    const next = queue.shift();
+    if (next) {
+      items.push(next);
+    }
+  }
+  return items;
+}
+
 async function handleJob(item: QueueItem): Promise<void> {
   try {
     const response = await sendToBackend(item.request);
     debug("job success", item.request.id);
-    sendResultToTab(item.tabId, item.frameId, {
-      type: "ANALYZE_RESULT",
-      payload: response
-    });
+    emitAnalyzeResult(item, response);
   } catch (error) {
     const backendError = error instanceof BackendRequestError ? error : undefined;
     const retryable = backendError?.retryable ?? false;
@@ -116,14 +158,186 @@ async function handleJob(item: QueueItem): Promise<void> {
     const analyzeError: AnalyzeError = {
       id: item.request.id,
       error: message,
-      retryable
+      retryable,
+      statusCode: backendError?.statusCode,
+      details: backendError?.details
     };
 
     debug("job failed", item.request.id, "retryable:", retryable, "message:", message);
-    sendResultToTab(item.tabId, item.frameId, {
-      type: "ANALYZE_ERROR",
-      payload: analyzeError
+    emitAnalyzeError(item, analyzeError);
+  }
+}
+
+function emitAnalyzeResult(item: QueueItem, payload: ItemAnalysisResponse): void {
+  sendResultToTab(item.tabId, item.frameId, {
+    schemaVersion: SCHEMA_VERSION,
+    type: "ANALYZE_RESULT",
+    payload
+  });
+}
+
+function emitAnalyzeError(item: QueueItem, payload: AnalyzeError): void {
+  sendResultToTab(item.tabId, item.frameId, {
+    schemaVersion: SCHEMA_VERSION,
+    type: "ANALYZE_ERROR",
+    payload
+  });
+}
+
+async function handleBatchJob(items: QueueItem[]): Promise<void> {
+  if (!items.length) {
+    return;
+  }
+
+  if (!shouldUseBatchProcessing()) {
+    for (const item of items) {
+      await handleJob(item);
+    }
+    return;
+  }
+
+  try {
+    const response = await sendBatchToBackend(items);
+    routeBatchResults(items, response);
+  } catch (error) {
+    const backendError = error instanceof BackendRequestError ? error : undefined;
+    if (backendError?.statusCode === 404) {
+      batchEndpointAvailable = false;
+      items.forEach((item) => enqueueJob(item));
+      return;
+    }
+
+    logError("batch request failed; falling back to single requests", error);
+    for (const item of items) {
+      await handleJob(item);
+    }
+  }
+}
+
+function routeBatchResults(items: QueueItem[], response: BatchAnalysisResponse): void {
+  const entriesById = new Map<string, BatchAnalysisResult>();
+  for (const entry of response.results) {
+    entriesById.set(entry.id, entry);
+  }
+
+  const perTabResults = new Map<number, BatchAnalysisResult[]>();
+
+  for (const item of items) {
+    const entry = entriesById.get(item.request.id);
+    if (!entry) {
+      emitAnalyzeError(item, {
+        id: item.request.id,
+        error: "Batch response missing entry",
+        retryable: false
+      });
+      continue;
+    }
+
+    if ("result" in entry) {
+      emitAnalyzeResult(item, entry.result);
+    } else {
+      emitAnalyzeError(item, entry.error);
+    }
+
+    const grouped = perTabResults.get(item.tabId);
+    if (grouped) {
+      grouped.push(entry);
+    } else {
+      perTabResults.set(item.tabId, [entry]);
+    }
+  }
+
+  perTabResults.forEach((results, tabId) => {
+    sendResultToTab(tabId, undefined, {
+      schemaVersion: SCHEMA_VERSION,
+      type: "ANALYZE_BATCH_RESULT",
+      payload: {
+        schemaVersion: response.schemaVersion,
+        results
+      }
     });
+  });
+}
+
+async function sendBatchToBackend(items: QueueItem[]): Promise<BatchAnalysisResponse> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    await ensureDevOriginRegistration();
+
+    const payload = {
+      schemaVersion: SCHEMA_VERSION,
+      items: items.map((item) => item.request)
+    };
+
+    let response: Response;
+    try {
+      response = await fetch(ANALYZE_BATCH_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+    } catch (networkError) {
+      devOriginRegistered = false;
+      throw networkError;
+    }
+
+    if (response.status === 404) {
+      throw new BackendRequestError("Batch endpoint not found", {
+        retryable: false,
+        statusCode: response.status
+      });
+    }
+
+    if (!response.ok) {
+      const retryable = response.status >= 500 || response.status === 429;
+      let details: string | undefined;
+      try {
+        details = (await response.text()) || undefined;
+      } catch {
+        details = undefined;
+      }
+      throw new BackendRequestError(`Batch endpoint responded with HTTP ${response.status}`, {
+        retryable,
+        statusCode: response.status,
+        details
+      });
+    }
+
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      throw new BackendRequestError("Failed to parse batch response", {
+        retryable: false,
+        cause: parseError
+      });
+    }
+
+    return normalizeBatchResponse(data);
+  } catch (error) {
+    if (error instanceof BackendRequestError) {
+      throw error;
+    }
+
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new BackendRequestError("Batch request timed out", {
+        retryable: true,
+        cause: error
+      });
+    }
+
+    const message = error instanceof Error ? error.message : "Unknown batch error";
+    throw new BackendRequestError(message, {
+      retryable: true,
+      cause: error
+    });
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -159,7 +373,17 @@ async function sendToBackend(request: ItemAnalysisRequest): Promise<ItemAnalysis
 
     if (!response.ok) {
       const retryable = response.status >= 500 || response.status === 429;
-      throw new BackendRequestError(`Backend responded with HTTP ${response.status}`, retryable);
+      let details: string | undefined;
+      try {
+        details = (await response.text()) || undefined;
+      } catch {
+        details = undefined;
+      }
+      throw new BackendRequestError(`Backend responded with HTTP ${response.status}`, {
+        retryable,
+        statusCode: response.status,
+        details
+      });
     }
 
     if (isDev) {
@@ -173,7 +397,10 @@ async function sendToBackend(request: ItemAnalysisRequest): Promise<ItemAnalysis
     try {
       data = await response.json();
     } catch (parseError) {
-      throw new BackendRequestError("Failed to parse backend response", false, parseError);
+      throw new BackendRequestError("Failed to parse backend response", {
+        retryable: false,
+        cause: parseError
+      });
     }
 
     return normalizeAnalysisResponse(data);
@@ -183,11 +410,17 @@ async function sendToBackend(request: ItemAnalysisRequest): Promise<ItemAnalysis
     }
 
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new BackendRequestError("Backend request timed out", true, error);
+      throw new BackendRequestError("Backend request timed out", {
+        retryable: true,
+        cause: error
+      });
     }
 
     const message = error instanceof Error ? error.message : String(error);
-    throw new BackendRequestError(message, true, error);
+    throw new BackendRequestError(message, {
+      retryable: true,
+      cause: error
+    });
   } finally {
     clearTimeout(timeoutId);
   }
@@ -195,7 +428,9 @@ async function sendToBackend(request: ItemAnalysisRequest): Promise<ItemAnalysis
 
 function normalizeAnalysisResponse(data: unknown): ItemAnalysisResponse {
   if (typeof data !== "object" || data === null) {
-    throw new BackendRequestError("Backend response is not an object", false);
+    throw new BackendRequestError("Backend response is not an object", {
+      retryable: false
+    });
   }
 
   const record = data as Record<string, unknown>;
@@ -205,13 +440,19 @@ function normalizeAnalysisResponse(data: unknown): ItemAnalysisResponse {
   const imageTag = record.image_tag;
 
   if (typeof id !== "string") {
-    throw new BackendRequestError("Backend response missing id", false);
+    throw new BackendRequestError("Backend response missing id", {
+      retryable: false
+    });
   }
   if (typeof summary !== "string") {
-    throw new BackendRequestError("Backend response missing summary", false);
+    throw new BackendRequestError("Backend response missing summary", {
+      retryable: false
+    });
   }
   if (typeof isAd !== "boolean") {
-    throw new BackendRequestError("Backend response missing is_ad flag", false);
+    throw new BackendRequestError("Backend response missing is_ad flag", {
+      retryable: false
+    });
   }
 
   let normalizedImageTag: string | undefined;
@@ -225,6 +466,81 @@ function normalizeAnalysisResponse(data: unknown): ItemAnalysisResponse {
     image_tag: normalizedImageTag,
     is_ad: isAd
   };
+}
+
+function normalizeBatchResponse(data: unknown): BatchAnalysisResponse {
+  if (typeof data !== "object" || data === null) {
+    throw new BackendRequestError("Batch response is not an object", {
+      retryable: false
+    });
+  }
+
+  const record = data as Record<string, unknown>;
+  const version = record.schemaVersion;
+  if (version !== SCHEMA_VERSION) {
+    throw new BackendRequestError("Batch response schema version mismatch", {
+      retryable: false
+    });
+  }
+
+  const rawResults = record.results;
+  if (!Array.isArray(rawResults)) {
+    throw new BackendRequestError("Batch response missing results array", {
+      retryable: false
+    });
+  }
+
+  const results = rawResults.map((entry) => normalizeBatchEntry(entry));
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    results
+  };
+}
+
+function normalizeBatchEntry(entry: unknown): BatchAnalysisResult {
+  if (typeof entry !== "object" || entry === null) {
+    throw new BackendRequestError("Batch entry is not an object", {
+      retryable: false
+    });
+  }
+  const record = entry as Record<string, unknown>;
+  const id = record.id;
+  if (typeof id !== "string" || id.length === 0) {
+    throw new BackendRequestError("Batch entry missing id", {
+      retryable: false
+    });
+  }
+
+  if ("result" in record && record.result) {
+    const normalized = normalizeAnalysisResponse(record.result);
+    return { id, result: normalized };
+  }
+
+  if (typeof record.error === "object" && record.error !== null) {
+    const errorRecord = record.error as Record<string, unknown>;
+    const message =
+      typeof errorRecord.error === "string" ? errorRecord.error : "Unknown error";
+    const retryable = Boolean(errorRecord.retryable);
+    const statusCode =
+      typeof errorRecord.statusCode === "number" ? errorRecord.statusCode : undefined;
+    const details =
+      typeof errorRecord.details === "string" ? errorRecord.details : undefined;
+
+    return {
+      id,
+      error: {
+        id,
+        error: message,
+        retryable,
+        statusCode,
+        details
+      }
+    };
+  }
+
+  throw new BackendRequestError("Batch entry missing result/error payload", {
+    retryable: false
+  });
 }
 
 function getExtensionId(): string | null {
@@ -281,6 +597,7 @@ function isValidRequest(payload: unknown): payload is ItemAnalysisRequest {
   }
   const record = payload as Record<string, unknown>;
   return (
+    record.schemaVersion === SCHEMA_VERSION &&
     typeof record.id === "string" &&
     record.id.length > 0 &&
     typeof record.text === "string" &&
@@ -314,6 +631,11 @@ chrome.runtime.onMessage.addListener((rawMessage, sender) => {
   }
 
   const message = rawMessage as RuntimeMessage;
+
+  if (message.schemaVersion !== SCHEMA_VERSION) {
+    logError("Received ANALYZE_REQUEST with mismatched schemaVersion", message.schemaVersion);
+    return;
+  }
 
   if (message.type !== "ANALYZE_REQUEST") {
     return;
@@ -359,11 +681,10 @@ chrome.commands.onCommand.addListener((command) => {
         return;
       }
 
-      chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_OVERLAYS" }, () => {
-        const err = chrome.runtime.lastError;
-        if (err && isDev) {
-          debug("toggle-overlays sendMessage error:", err.message);
-        }
+      sendResultToTab(tab.id, undefined, {
+        schemaVersion: SCHEMA_VERSION,
+        type: "TOGGLE_OVERLAYS",
+        payload: undefined
       });
     });
   });

@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import type { RuntimeMessage } from "../types/messages";
+import { SCHEMA_VERSION, type RuntimeMessage } from "../types/messages";
 
 function createChromeContentMock() {
   const sendMessage = vi.fn((message: unknown, responseCallback?: () => void) => {
@@ -86,8 +86,10 @@ describe("content pipeline", () => {
     expect(chromeMock.runtime.sendMessage).toHaveBeenCalledTimes(1);
     const [message] = chromeMock.runtime.sendMessage.mock.calls[0];
     expect(message).toMatchObject({
+      schemaVersion: SCHEMA_VERSION,
       type: "ANALYZE_REQUEST",
       payload: {
+        schemaVersion: SCHEMA_VERSION,
         id: expect.stringMatching(/^item-/),
         text: expect.stringContaining("Breaking news story")
       }
@@ -103,6 +105,7 @@ describe("content pipeline", () => {
     article.setAttribute("data-llm-overlay-id", id);
 
     listener({
+      schemaVersion: SCHEMA_VERSION,
       type: "ANALYZE_RESULT",
       payload: {
         id,
@@ -124,6 +127,7 @@ describe("content pipeline", () => {
     article.setAttribute("data-llm-overlay-id", id);
 
     listener({
+      schemaVersion: SCHEMA_VERSION,
       type: "ANALYZE_RESULT",
       payload: {
         id,
@@ -136,13 +140,13 @@ describe("content pipeline", () => {
     expect(overlay).not.toBeNull();
     expect(overlay?.classList.contains("llm-overlay-hidden")).toBe(false);
 
-    listener({ type: "TOGGLE_OVERLAYS" });
+    listener({ schemaVersion: SCHEMA_VERSION, type: "TOGGLE_OVERLAYS", payload: undefined });
 
     await vi.waitFor(() => {
       expect(overlay?.classList.contains("llm-overlay-hidden")).toBe(true);
     });
 
-    listener({ type: "TOGGLE_OVERLAYS" });
+    listener({ schemaVersion: SCHEMA_VERSION, type: "TOGGLE_OVERLAYS", payload: undefined });
     await vi.waitFor(() => {
       expect(overlay?.classList.contains("llm-overlay-hidden")).toBe(false);
     });
@@ -173,6 +177,7 @@ describe("content pipeline", () => {
 
     const listener = chromeMock.runtime.onMessage.addListener.mock.calls[0][0];
     listener({
+      schemaVersion: SCHEMA_VERSION,
       type: "ANALYZE_RESULT",
       payload: {
         id,

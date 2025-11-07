@@ -22,6 +22,7 @@ cp .env.example .env
 | `ENABLE_DEV_EXTENSION_REGISTRATION` | Allow unpacked extensions to register themselves | `true` |
 | `MOCK_OLLAMA` | Force canned responses for every request | `false` |
 | `MOCK_OLLAMA_FALLBACK` | Retry real model once, then fall back to mock payload | `false` |
+| `ENABLE_BATCH_ANALYZE` | Expose `POST /api/analyze/batch` for grouped requests | `false` |
 
 During local development you can keep `ALLOWED_EXTENSION_IDS` empty and rely on
 `ENABLE_DEV_EXTENSION_REGISTRATION=true`, which lets the unpacked MV3 build post its
@@ -57,6 +58,7 @@ before loading the extension.
 
 - `GET /health` – returns `{ status, model, mock }` for monitoring.
 - `POST /api/analyze` – accepts the summarized payload used by the extension.
+- `POST /api/analyze/batch` – (optional, gated by `ENABLE_BATCH_ANALYZE`) processes up to four items per request for faster local analysis.
 - `POST /api/dev/register-extension-origin?id=<extensionId>` – (dev only) allows
   an unpacked extension to register its Chrome origin dynamically so CORS checks
   pass. The background service worker calls this endpoint automatically using a

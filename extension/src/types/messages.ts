@@ -1,7 +1,17 @@
+export const SCHEMA_VERSION = 1 as const;
+
+export interface ItemSourceMeta {
+  profileName?: string;
+  anchorTag?: string;
+  anchorStrategy?: string;
+}
+
 export interface ItemAnalysisRequest {
+  schemaVersion: typeof SCHEMA_VERSION;
   id: string;
   text: string;
   image?: string;
+  sourceMeta?: ItemSourceMeta;
 }
 
 export interface ItemAnalysisResponse {
@@ -15,10 +25,33 @@ export interface AnalyzeError {
   id: string;
   error: string;
   retryable: boolean;
+  statusCode?: number;
+  details?: string;
+}
+
+export interface BatchAnalysisRequest {
+  schemaVersion: typeof SCHEMA_VERSION;
+  items: ItemAnalysisRequest[];
+}
+
+export type BatchAnalysisResult =
+  | { id: string; result: ItemAnalysisResponse }
+  | { id: string; error: AnalyzeError };
+
+export interface BatchAnalysisResponse {
+  schemaVersion: typeof SCHEMA_VERSION;
+  results: BatchAnalysisResult[];
+}
+
+interface RuntimeMessageBase<Type extends string, Payload = undefined> {
+  type: Type;
+  schemaVersion: typeof SCHEMA_VERSION;
+  payload: Payload;
 }
 
 export type RuntimeMessage =
-  | { type: "ANALYZE_REQUEST"; payload: ItemAnalysisRequest }
-  | { type: "ANALYZE_RESULT"; payload: ItemAnalysisResponse }
-  | { type: "ANALYZE_ERROR"; payload: AnalyzeError }
-  | { type: "TOGGLE_OVERLAYS" };
+  | RuntimeMessageBase<"ANALYZE_REQUEST", ItemAnalysisRequest>
+  | RuntimeMessageBase<"ANALYZE_RESULT", ItemAnalysisResponse>
+  | RuntimeMessageBase<"ANALYZE_ERROR", AnalyzeError>
+  | RuntimeMessageBase<"ANALYZE_BATCH_RESULT", BatchAnalysisResponse>
+  | RuntimeMessageBase<"TOGGLE_OVERLAYS", undefined>;

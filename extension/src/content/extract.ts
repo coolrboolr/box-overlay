@@ -2,7 +2,7 @@ import { isLikelyArticleElement } from "./domSelectors";
 import { assignIdToNode, getOrCreateItemId, isProcessed, markProcessed } from "./state";
 import { rememberAnchor, resolveAnchor } from "./anchors";
 import { getActiveProfile } from "./siteProfiles";
-import type { ItemAnalysisRequest } from "../types/messages";
+import { type ItemAnalysisRequest, SCHEMA_VERSION } from "../types/messages";
 
 const MAX_TEXT_LENGTH = 1500;
 const STRUCTURE_QUERY = "p,li";
@@ -101,7 +101,22 @@ export async function extractItems(root: Document | Element): Promise<ItemAnalys
     rememberAnchor(id, anchor);
     const image = await collectImageData(element);
 
-    const item: ItemAnalysisRequest = image ? { id, text, image } : { id, text };
+    const sourceMeta = {
+      profileName: activeProfile.name,
+      anchorTag: anchor.tagName?.toLowerCase(),
+      anchorStrategy: anchor === element ? "self" : "ancestor"
+    };
+
+    const item: ItemAnalysisRequest = {
+      schemaVersion: SCHEMA_VERSION,
+      id,
+      text,
+      sourceMeta
+    };
+
+    if (image) {
+      item.image = image;
+    }
 
     markProcessed(anchor);
     return item;

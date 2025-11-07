@@ -27,6 +27,7 @@ export default defineConfig((options) => {
     watch: options.watch ? ["src/**/*", `${staticDir}/**/*`] : undefined,
     define: {
       "process.env.NODE_ENV": JSON.stringify(nodeEnv),
+      "process.env.ENABLE_BATCH": JSON.stringify(process.env.ENABLE_BATCH ?? ""),
       __LLM_OVERLAY_DEV__: JSON.stringify(isDevBuild)
     },
     esbuildOptions(buildOptions) {
