@@ -4,18 +4,24 @@ import { extractItems } from "./extract";
 import { getActiveProfile } from "./siteProfiles";
 import {
   clearDismissed,
+  clearLastRequestPayload,
   forEachOverlay,
+  getDockMode,
   getGlobalEnabled,
   getLastPayload,
+  getLastRequestPayload,
   getOverlay,
+  rememberRequestPayload,
+  toggleDockMode as toggleDockModeSetting,
   toggleGlobalEnabled,
   wasDismissed
 } from "./uiState";
-import { renderOverlay, removeOverlay, updateOverlay } from "./overlay";
+import { renderOverlay, removeOverlay, updateOverlay, updateOverlayStatus } from "./overlay";
 import { clearAnchor, getAnchor } from "./anchors";
 import type {
   ItemAnalysisRequest,
   ItemAnalysisResponse,
+  AnalyzeError,
   RuntimeMessage
 } from "../types/messages";
 import { isDev } from "../shared/isDev";
@@ -23,7 +29,10 @@ import { isDev } from "../shared/isDev";
 const activeProfile = getActiveProfile();
 const candidateSelector = activeProfile.selectors.join(",");
 
+const PENDING_SUMMARY = "Analyzing…";
+
 let overlaysEnabled = true;
+let dockEnabled = false;
 const anchorRetryIds = new Set<string>();
 let anchorRetryCount = 0;
 let rescanInFlight: Promise<boolean> = Promise.resolve(false);
@@ -52,6 +61,8 @@ function shouldIgnoreKeyEvent(event: KeyboardEvent): boolean {
 }
 
 function sendAnalyzeRequest(item: ItemAnalysisRequest): void {
+  rememberRequestPayload(item.id, item);
+  ensurePendingOverlay(item);
   if (isDev) {
     debug("send analyze", {
       id: item.id,
@@ -157,7 +168,8 @@ async function handleAnalyzeResult(payload: ItemAnalysisResponse): Promise<void>
       return;
     }
 
-    updateOverlay(payload.id, payload);
+    updateOverlay(payload.id, payload, { status: "resolved" });
+    hideOverlayIfDisabled(payload.id);
     return;
   }
 
@@ -170,10 +182,45 @@ async function handleAnalyzeResult(payload: ItemAnalysisResponse): Promise<void>
   }
 
   renderOverlay(target, payload);
+  hideOverlayIfDisabled(payload.id);
+  clearLastRequestPayload(payload.id);
 
   if (anchorMissing) {
     await recoverMissingOverlayTarget(payload.id);
   }
+}
+
+function handleAnalyzeError(payload: AnalyzeError): void {
+  const target = getAnchor(payload.id) ?? findTargetElementById(payload.id);
+  if (!target) {
+    if (isDev) {
+      debug("missing target for error payload", payload.id);
+    }
+    return;
+  }
+
+  const existing = getLastPayload(payload.id);
+  const fallback: ItemAnalysisResponse = existing ?? {
+    id: payload.id,
+    summary: payload.error,
+    is_ad: false
+  };
+
+  const request = getLastRequestPayload(payload.id);
+  const onRetry =
+    payload.retryable && request
+      ? () => {
+          ensurePendingOverlay(request);
+          sendAnalyzeRequest(request);
+        }
+      : undefined;
+
+  renderOverlay(target, fallback, {
+    status: "error",
+    errorMessage: payload.error,
+    onRetry: onRetry ?? null
+  });
+  hideOverlayIfDisabled(payload.id);
 }
 
 async function recoverMissingOverlayTarget(id: string): Promise<void> {
@@ -235,6 +282,66 @@ async function handleToggleOverlays(): Promise<void> {
   }
 }
 
+function hideOverlayIfDisabled(id: string): void {
+  if (overlaysEnabled) {
+    return;
+  }
+  const record = getOverlay(id);
+  record?.container.classList.add("llm-overlay-hidden");
+}
+
+function ensurePendingOverlay(item: ItemAnalysisRequest): void {
+  if (wasDismissed(item.id)) {
+    return;
+  }
+
+  const existing = getOverlay(item.id);
+  const target =
+    existing?.target ??
+    getAnchor(item.id) ??
+    findTargetElementById(item.id);
+
+  if (!target) {
+    return;
+  }
+
+  if (existing) {
+    updateOverlayStatus(item.id, "pending");
+    hideOverlayIfDisabled(item.id);
+    return;
+  }
+
+  renderOverlay(
+    target,
+    {
+      id: item.id,
+      summary: PENDING_SUMMARY,
+      is_ad: false
+    },
+    { status: "pending" }
+  );
+  hideOverlayIfDisabled(item.id);
+}
+
+async function handleDockToggle(): Promise<void> {
+  dockEnabled = await toggleDockModeSetting();
+  applyDockMode(dockEnabled);
+  if (isDev) {
+    debug("dock mode", dockEnabled ? "enabled" : "disabled");
+  }
+}
+
+function applyDockMode(enabled: boolean): void {
+  if (enabled) {
+    document.body.dataset.llmDock = "true";
+  } else {
+    delete document.body.dataset.llmDock;
+  }
+  forEachOverlay((record) => {
+    record.container.classList.toggle("llm-overlay-wrapper--dock", enabled);
+  });
+}
+
 void (async () => {
   try {
     overlaysEnabled = await getGlobalEnabled();
@@ -249,6 +356,18 @@ void (async () => {
   }
 })();
 
+void (async () => {
+  try {
+    dockEnabled = await getDockMode();
+  } catch (error) {
+    if (isDev) {
+      console.warn("[content] failed to read dock mode state; defaulting to float", error);
+    }
+    dockEnabled = false;
+  }
+  applyDockMode(dockEnabled);
+})();
+
 debug("initializeScanner start");
 
 initializeScanner((batch) => {
@@ -259,12 +378,21 @@ initializeScanner((batch) => {
 });
 
 window.addEventListener("keydown", (event) => {
-  // Require only Alt/Option
+  const isDockShortcut =
+    event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey && event.code === "KeyD";
+  if (isDockShortcut) {
+    if (shouldIgnoreKeyEvent(event)) {
+      return;
+    }
+    event.preventDefault();
+    void handleDockToggle();
+    return;
+  }
+
   if (!event.altKey || event.shiftKey || event.ctrlKey || event.metaKey) {
     return;
   }
 
-  // Use physical key so layouts/modifiers (e.g., Option+L => "¬" on macOS) still work.
   if (event.code !== "KeyL") {
     return;
   }
@@ -290,7 +418,7 @@ chrome.runtime.onMessage.addListener((message) => {
       void handleAnalyzeResult(message.payload);
       break;
     case "ANALYZE_ERROR":
-      debug("analyze error", message.payload);
+      handleAnalyzeError(message.payload);
       break;
     default:
       break;

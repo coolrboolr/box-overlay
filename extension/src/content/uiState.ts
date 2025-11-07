@@ -1,5 +1,7 @@
-import type { ItemAnalysisResponse } from "../types/messages";
+import type { ItemAnalysisRequest, ItemAnalysisResponse } from "../types/messages";
 import { isDev } from "../shared/isDev";
+
+export type OverlayStatus = "pending" | "resolved" | "error";
 
 export interface OverlayRecord {
   id: string;
@@ -7,13 +9,26 @@ export interface OverlayRecord {
   container: HTMLElement;
   data: ItemAnalysisResponse;
   dismissed: boolean;
+  status: OverlayStatus;
+  errorMessage?: string;
+  onRetry?: (() => void) | null;
+}
+
+interface OverlayRecordUpdate {
+  data?: Partial<ItemAnalysisResponse>;
+  status?: OverlayStatus;
+  errorMessage?: string;
+  onRetry?: (() => void) | null;
 }
 
 const overlayMap = new Map<string, OverlayRecord>();
 const dismissedIds = new Set<string>();
 const lastPayloadById = new Map<string, ItemAnalysisResponse>();
+const lastRequestById = new Map<string, ItemAnalysisRequest>();
 
 const OVERLAY_ENABLED_KEY = "overlayEnabled";
+const DOCK_MODE_KEY = "overlayDockMode";
+
 let storageAccessBlocked = false;
 let storageWarningLogged = false;
 
@@ -113,24 +128,113 @@ export async function toggleGlobalEnabled(): Promise<boolean> {
   return next;
 }
 
+async function setDockModeInternal(enabled: boolean): Promise<void> {
+  if (storageAccessBlocked) {
+    return;
+  }
+  if (!chrome.storage?.session?.set) {
+    storageUnavailableWarning("set", "session storage API missing");
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    try {
+      chrome.storage.session.set({ [DOCK_MODE_KEY]: enabled }, () => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          storageUnavailableWarning("set", err.message);
+        }
+        resolve();
+      });
+    } catch (error) {
+      storageUnavailableWarning("set", error);
+      resolve();
+    }
+  });
+}
+
+export async function getDockMode(): Promise<boolean> {
+  if (storageAccessBlocked) {
+    return false;
+  }
+  if (!chrome.storage?.session?.get) {
+    storageUnavailableWarning("get", "session storage API missing");
+    return false;
+  }
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.session.get(DOCK_MODE_KEY, (result) => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          storageUnavailableWarning("get", err.message);
+          resolve(false);
+          return;
+        }
+        const value = result?.[DOCK_MODE_KEY];
+        resolve(value === undefined ? false : Boolean(value));
+      });
+    } catch (error) {
+      storageUnavailableWarning("get", error);
+      resolve(false);
+    }
+  });
+}
+
+export async function toggleDockMode(): Promise<boolean> {
+  const current = await getDockMode();
+  const next = !current;
+  await setDockModeInternal(next);
+  return next;
+}
+
 export function registerOverlay(record: OverlayRecord): void {
-  overlayMap.set(record.id, { ...record, dismissed: false });
+  const normalized: OverlayRecord = {
+    ...record,
+    dismissed: false,
+    status: record.status ?? "resolved",
+    onRetry: record.onRetry ?? null
+  };
+  overlayMap.set(record.id, normalized);
   dismissedIds.delete(record.id);
-  lastPayloadById.set(record.id, record.data);
+  if (normalized.status === "resolved") {
+    lastPayloadById.set(record.id, normalized.data);
+  }
 }
 
 export function getOverlay(id: string): OverlayRecord | undefined {
   return overlayMap.get(id);
 }
 
-export function updateOverlayRecord(id: string, data: Partial<ItemAnalysisResponse>): void {
+export function updateOverlayRecord(id: string, updates: OverlayRecordUpdate = {}): OverlayRecord | undefined {
   const record = overlayMap.get(id);
   if (!record) {
-    return;
+    return undefined;
   }
-  record.data = { ...record.data, ...data };
+
+  if (updates.data) {
+    record.data = { ...record.data, ...updates.data };
+  }
+  if (updates.status) {
+    record.status = updates.status;
+    if (updates.status !== "error") {
+      record.errorMessage = undefined;
+      record.onRetry = null;
+    }
+  }
+  if (updates.errorMessage !== undefined) {
+    record.errorMessage = updates.errorMessage;
+  }
+  if (updates.onRetry !== undefined) {
+    record.onRetry = updates.onRetry;
+  }
+
   overlayMap.set(id, record);
-  lastPayloadById.set(id, record.data);
+
+  if (record.status === "resolved") {
+    lastPayloadById.set(id, record.data);
+  }
+
+  return record;
 }
 
 export function markDismissed(id: string): void {
@@ -165,4 +269,16 @@ export function clearDismissed(id: string): void {
 
 export function getLastPayload(id: string): ItemAnalysisResponse | undefined {
   return lastPayloadById.get(id);
+}
+
+export function rememberRequestPayload(id: string, payload: ItemAnalysisRequest): void {
+  lastRequestById.set(id, payload);
+}
+
+export function getLastRequestPayload(id: string): ItemAnalysisRequest | undefined {
+  return lastRequestById.get(id);
+}
+
+export function clearLastRequestPayload(id: string): void {
+  lastRequestById.delete(id);
 }

@@ -5,6 +5,7 @@
   right: 8px;
   max-width: min(320px, 60vw);
   z-index: 2147483000;
+  transition: transform 200ms ease, opacity 200ms ease;
 }
 
 .llm-overlay-card {
@@ -20,8 +21,9 @@
   gap: 6px;
   pointer-events: auto;
   position: relative;
-  transition: transform 180ms ease, opacity 180ms ease;
+  transition: transform 180ms ease, opacity 180ms ease, box-shadow 180ms ease;
   backdrop-filter: blur(8px);
+  animation: llm-overlay-fade-in 200ms ease;
 }
 
 .llm-overlay-card--uncategorized {
@@ -110,4 +112,95 @@
 
 .llm-overlay-hidden {
   display: none !important;
+}
+
+.llm-overlay-status {
+  font-size: 12px;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 16px;
+}
+
+.llm-overlay-card--pending {
+  background: rgba(241, 245, 249, 0.92);
+  color: #0f172a;
+  border-left-color: rgba(59, 130, 246, 0.65);
+}
+
+.llm-overlay-card--pending .llm-overlay-summary {
+  font-style: italic;
+}
+
+.llm-overlay-card--pending .llm-overlay-meta,
+.llm-overlay-card--error .llm-overlay-meta {
+  display: none;
+}
+
+.llm-overlay-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(59, 130, 246, 0.3);
+  border-top-color: rgba(59, 130, 246, 0.9);
+  animation: llm-spinner 900ms linear infinite;
+}
+
+.llm-overlay-card--error {
+  background: rgba(127, 29, 29, 0.9);
+  color: #fee2e2;
+  border-left-color: #fca5a5;
+}
+
+.llm-overlay-retry {
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: none;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  cursor: pointer;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.llm-overlay-retry:hover,
+.llm-overlay-retry:focus {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+@keyframes llm-overlay-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes llm-spinner {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+body[data-llm-dock="true"] .llm-overlay-wrapper {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  left: auto !important;
+  transform: translateY(calc(-1 * var(--llm-overlay-order, 0) * (100% + 12px)));
+  max-width: min(360px, 80vw);
+  z-index: 2147483000;
+}
+
+body[data-llm-dock="true"] .llm-overlay-wrapper .llm-overlay-card {
+  pointer-events: auto;
 }

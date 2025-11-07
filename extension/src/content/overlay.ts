@@ -1,5 +1,6 @@
 import type { ItemAnalysisResponse } from "../types/messages";
 import {
+  type OverlayStatus,
   getOverlay,
   markDismissed,
   registerOverlay,
@@ -10,24 +11,111 @@ import { clearAnchor } from "./anchors";
 
 export const OVERLAY_Z_INDEX = 2147483000;
 const DEFAULT_TAG_LABEL = "Uncategorized";
+const PLACEHOLDER_SUMMARY = "Analyzing…";
 
-function applyCardState(card: HTMLElement, data: ItemAnalysisResponse): void {
+export interface OverlayRenderOptions {
+  status?: OverlayStatus;
+  errorMessage?: string;
+  onRetry?: (() => void) | null;
+}
+
+let overlayOrderCounter = 0;
+
+function shouldDock(): boolean {
+  return document.body?.dataset.llmDock === "true";
+}
+
+function applyDockState(wrapper: HTMLElement): void {
+  wrapper.classList.toggle("llm-overlay-wrapper--dock", shouldDock());
+}
+
+function ensureStatusElement(card: HTMLElement): HTMLElement {
+  let statusEl = card.querySelector<HTMLElement>(".llm-overlay-status");
+  if (!statusEl) {
+    statusEl = document.createElement("div");
+    statusEl.className = "llm-overlay-status";
+    card.appendChild(statusEl);
+  }
+  return statusEl;
+}
+
+function removeElement(selector: string, root: HTMLElement): void {
+  const el = root.querySelector(selector);
+  if (el) {
+    el.remove();
+  }
+}
+
+function applyCardState(card: HTMLElement, record: ReturnType<typeof getOverlay>): void {
+  if (!record) {
+    return;
+  }
+
+  const data = record.data;
+  const status = record.status;
+
+  const summaryEl = card.querySelector<HTMLElement>(".llm-overlay-summary");
+  const metaEl = card.querySelector<HTMLElement>(".llm-overlay-meta");
+  if (!summaryEl || !metaEl) {
+    return;
+  }
+
+  const statusEl = ensureStatusElement(card);
+  statusEl.textContent = "";
+
+  removeElement(".llm-overlay-spinner", statusEl);
+  removeElement(".llm-overlay-retry", card);
+
+  if (status === "pending") {
+    summaryEl.textContent = PLACEHOLDER_SUMMARY;
+    metaEl.hidden = true;
+
+    const spinner = document.createElement("span");
+    spinner.className = "llm-overlay-spinner";
+    statusEl.appendChild(spinner);
+    statusEl.appendChild(document.createTextNode("Analyzing…"));
+
+    card.classList.add("llm-overlay-card--pending");
+    card.classList.remove("llm-overlay-card--error");
+    return;
+  }
+
+  if (status === "error") {
+    summaryEl.textContent = record.errorMessage ?? "We couldn't analyze this content.";
+    metaEl.hidden = true;
+    statusEl.textContent = record.errorMessage ?? "Try again in a moment.";
+
+    if (record.onRetry) {
+      const retryButton = document.createElement("button");
+      retryButton.type = "button";
+      retryButton.className = "llm-overlay-retry";
+      retryButton.textContent = "Retry";
+      retryButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        record.onRetry?.();
+      });
+      statusEl.appendChild(retryButton);
+    }
+
+    card.classList.add("llm-overlay-card--error");
+    card.classList.remove("llm-overlay-card--pending");
+    return;
+  }
+
+  // Resolved state
+  card.classList.remove("llm-overlay-card--pending", "llm-overlay-card--error");
+  metaEl.hidden = false;
+  statusEl.textContent = "";
+
   const isOrganic = !data.is_ad && Boolean(data.image_tag);
   const isUncategorized = !data.is_ad && !data.image_tag;
+
+  summaryEl.textContent = data.summary;
 
   card.classList.toggle("llm-overlay-card--ad", data.is_ad);
   card.classList.toggle("llm-overlay-card--organic", isOrganic);
   card.classList.toggle("llm-overlay-card--uncategorized", isUncategorized);
-
-  const summaryEl = card.querySelector<HTMLElement>(".llm-overlay-summary");
-  if (summaryEl) {
-    summaryEl.textContent = data.summary;
-  }
-
-  const metaEl = card.querySelector<HTMLElement>(".llm-overlay-meta");
-  if (!metaEl) {
-    return;
-  }
 
   const tagText = data.image_tag ?? (isUncategorized ? DEFAULT_TAG_LABEL : "");
   let tagEl = metaEl.querySelector<HTMLElement>(".llm-overlay-tag");
@@ -55,7 +143,11 @@ function applyCardState(card: HTMLElement, data: ItemAnalysisResponse): void {
   }
 }
 
-export function renderOverlay(target: Element, data: ItemAnalysisResponse): void {
+export function renderOverlay(
+  target: Element,
+  data: ItemAnalysisResponse,
+  options: OverlayRenderOptions = {}
+): void {
   const existing = getOverlay(data.id);
   if (existing) {
     removeOverlay(data.id, { releaseAnchor: false });
@@ -69,8 +161,11 @@ export function renderOverlay(target: Element, data: ItemAnalysisResponse): void
   const wrapper = document.createElement("div");
   wrapper.className = "llm-overlay-wrapper";
   wrapper.dataset.overlayId = data.id;
+  wrapper.style.setProperty("--llm-overlay-order", `${overlayOrderCounter++}`);
+  applyDockState(wrapper);
   wrapper.setAttribute("role", "note");
   wrapper.setAttribute("aria-live", "polite");
+  wrapper.style.zIndex = `${OVERLAY_Z_INDEX}`;
 
   const card = document.createElement("div");
   card.className = "llm-overlay-card";
@@ -83,6 +178,10 @@ export function renderOverlay(target: Element, data: ItemAnalysisResponse): void
   const metaEl = document.createElement("div");
   metaEl.className = "llm-overlay-meta";
   card.appendChild(metaEl);
+
+  const statusEl = document.createElement("div");
+  statusEl.className = "llm-overlay-status";
+  card.appendChild(statusEl);
 
   const dismissButton = document.createElement("button");
   dismissButton.type = "button";
@@ -100,30 +199,59 @@ export function renderOverlay(target: Element, data: ItemAnalysisResponse): void
   wrapper.appendChild(card);
   target.appendChild(wrapper);
 
-  applyCardState(card, data);
-
   registerOverlay({
     id: data.id,
     target,
     container: wrapper,
     data,
-    dismissed: false
+    dismissed: false,
+    status: options.status ?? "resolved",
+    errorMessage: options.errorMessage,
+    onRetry: options.onRetry ?? null
   });
+
+  applyCardState(card, getOverlay(data.id));
 }
 
-export function updateOverlay(id: string, data: ItemAnalysisResponse): void {
-  const record = getOverlay(id);
+export function updateOverlay(
+  id: string,
+  data: ItemAnalysisResponse,
+  options: OverlayRenderOptions = {}
+): void {
+  const record = updateOverlayRecord(id, {
+    data,
+    status: options.status,
+    errorMessage: options.errorMessage,
+    onRetry: options.onRetry ?? null
+  });
   if (!record) {
     return;
   }
-
   const card = record.container.querySelector<HTMLElement>(".llm-overlay-card");
   if (!card) {
     return;
   }
+  applyCardState(card, record);
+}
 
-  applyCardState(card, data);
-  updateOverlayRecord(id, data);
+export function updateOverlayStatus(
+  id: string,
+  status: OverlayStatus,
+  extras: { errorMessage?: string; onRetry?: (() => void) | null } = {}
+): void {
+  const record = updateOverlayRecord(id, {
+    status,
+    errorMessage: extras.errorMessage,
+    onRetry: extras.onRetry ?? null
+  });
+  if (!record) {
+    return;
+  }
+  const card = record.container.querySelector<HTMLElement>(".llm-overlay-card");
+  if (!card) {
+    return;
+  }
+  applyCardState(card, record);
 }
 
 export function removeOverlay(id: string, options?: { releaseAnchor?: boolean }): void {

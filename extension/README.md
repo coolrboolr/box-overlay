@@ -28,3 +28,5 @@ npm install
   one log per `/api/analyze` request/response pair.
 - Option/Alt+L toggles overlays on the active page. The hotkey is blocked while
   focus is inside text inputs, selects, or editable regions.
+- Option/Alt+Shift+D toggles dock mode, pinning overlays to the bottom-right
+  stack for quick triage (state persists per session).
