@@ -204,3 +204,17 @@ body[data-llm-dock="true"] .llm-overlay-wrapper {
 body[data-llm-dock="true"] .llm-overlay-wrapper .llm-overlay-card {
   pointer-events: auto;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .llm-overlay-wrapper,
+  body[data-llm-dock="true"] .llm-overlay-wrapper,
+  .llm-overlay-card {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  .llm-overlay-spinner {
+    animation: none !important;
+    border-top-color: currentColor;
+  }
+}

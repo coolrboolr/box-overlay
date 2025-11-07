@@ -10,10 +10,38 @@ npm install
 cp .env.example .env
 ```
 
-Update `.env` with your extension ID (for CORS) and Ollama settings if needed. During
-local development you can leave `ALLOWED_EXTENSION_IDS` blank and rely on
-`ENABLE_DEV_EXTENSION_REGISTRATION=true` (default) so the extension can register
-itself automatically.
+### Environment Variables
+
+| Key | Purpose | Default |
+| --- | --- | --- |
+| `PORT` | Express listen port (binds to `127.0.0.1`) | `5000` |
+| `OLLAMA_BASE_URL` | Address of your local Ollama daemon | `http://127.0.0.1:11434` |
+| `OLLAMA_MODEL` | Model name passed to `ollama generate` | `llama3` |
+| `OLLAMA_TIMEOUT_MS` | Request timeout before aborting | `20000` |
+| `ALLOWED_EXTENSION_IDS` | Comma-separated Chrome IDs allowed via CORS | *(empty → dynamic registration)* |
+| `ENABLE_DEV_EXTENSION_REGISTRATION` | Allow unpacked extensions to register themselves | `true` |
+| `MOCK_OLLAMA` | Force canned responses for every request | `false` |
+| `MOCK_OLLAMA_FALLBACK` | Retry real model once, then fall back to mock payload | `false` |
+
+During local development you can keep `ALLOWED_EXTENSION_IDS` empty and rely on
+`ENABLE_DEV_EXTENSION_REGISTRATION=true`, which lets the unpacked MV3 build post its
+origin to `/api/dev/register-extension-origin`.
+
+### Model Setup
+
+```bash
+ollama pull llama3:8b        # or another compatible model
+ollama serve                 # keep this running in a separate terminal
+```
+
+Then start the proxy:
+
+```bash
+npm run dev
+```
+
+Hit `curl -X POST http://127.0.0.1:5000/api/analyze ...` to confirm end-to-end flow
+before loading the extension.
 
 ## Development
 
@@ -43,4 +71,6 @@ curl -X POST http://127.0.0.1:5000/api/analyze \
   -d '{"id":"demo-1","text":"Sample article"}'
 ```
 
-If Ollama is not running locally, set `MOCK_OLLAMA=true` (or `MOCK_OLLAMA_FALLBACK=true` to fall back only when the call fails) for deterministic responses.
+If Ollama is not running locally, set `MOCK_OLLAMA=true` (or
+`MOCK_OLLAMA_FALLBACK=true` to fall back only after a real attempt) for
+deterministic responses.
