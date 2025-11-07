@@ -359,17 +359,12 @@ chrome.commands.onCommand.addListener((command) => {
         return;
       }
 
-      chrome.tabs.sendMessage(
-        tab.id,
-        { type: "TOGGLE_OVERLAYS" },
-        undefined,
-        () => {
-          const err = chrome.runtime.lastError;
-          if (err && isDev) {
-            debug("toggle-overlays sendMessage error:", err.message);
-          }
+      chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_OVERLAYS" }, () => {
+        const err = chrome.runtime.lastError;
+        if (err && isDev) {
+          debug("toggle-overlays sendMessage error:", err.message);
         }
-      );
+      });
     });
   });
 });

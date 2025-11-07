@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import type { RuntimeMessage } from "../types/messages";
 
 function createChromeContentMock() {
   const sendMessage = vi.fn((message: unknown, responseCallback?: () => void) => {
@@ -145,5 +146,44 @@ describe("content pipeline", () => {
     await vi.waitFor(() => {
       expect(overlay?.classList.contains("llm-overlay-hidden")).toBe(false);
     });
+  });
+
+  it("does not re-enqueue analysis when a replacement node already exists", async () => {
+    await import("../content/index");
+
+    await vi.advanceTimersByTimeAsync(500);
+    await Promise.resolve();
+
+    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledTimes(1);
+    const firstCall = chromeMock.runtime.sendMessage.mock.calls[0];
+    const firstMessage = firstCall[0] as Extract<
+      RuntimeMessage,
+      { type: "ANALYZE_REQUEST" }
+    >;
+    const id = firstMessage.payload.id;
+
+    const originalArticle = document.querySelector("article");
+    originalArticle?.remove();
+
+    const replacement = document.createElement("article");
+    replacement.className = "post";
+    replacement.textContent = "Re-rendered story ".repeat(10);
+    replacement.setAttribute("data-llm-overlay-id", id);
+    document.body.appendChild(replacement);
+
+    const listener = chromeMock.runtime.onMessage.addListener.mock.calls[0][0];
+    listener({
+      type: "ANALYZE_RESULT",
+      payload: {
+        id,
+        summary: "Stale summary",
+        is_ad: false
+      }
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(chromeMock.runtime.sendMessage).toHaveBeenCalledTimes(1);
   });
 });

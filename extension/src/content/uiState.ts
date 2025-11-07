@@ -14,14 +14,49 @@ const dismissedIds = new Set<string>();
 const lastPayloadById = new Map<string, ItemAnalysisResponse>();
 
 const OVERLAY_ENABLED_KEY = "overlayEnabled";
+let storageAccessBlocked = false;
+let storageWarningLogged = false;
+
+function isStorageAccessForbidden(error: unknown): boolean {
+  const message =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : error && typeof (error as { message?: unknown }).message === "string"
+          ? String((error as { message: unknown }).message)
+          : undefined;
+  if (!message) {
+    return false;
+  }
+  return message.toLowerCase().includes("access to storage is not allowed");
+}
 
 function storageUnavailableWarning(action: string, error: unknown): void {
-  if (isDev) {
-    console.warn(`[content] storage.${action} unavailable; falling back`, error);
+  const blocked = isStorageAccessForbidden(error);
+  if (blocked) {
+    storageAccessBlocked = true;
+    return;
   }
+  if (!isDev || storageWarningLogged) {
+    return;
+  }
+
+  const info =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : error;
+
+  console.info(`[content] storage.${action} unavailable; falling back`, info);
+  storageWarningLogged = true;
 }
 
 export async function setGlobalEnabled(enabled: boolean): Promise<void> {
+  if (storageAccessBlocked) {
+    return;
+  }
   if (!chrome.storage?.session?.set) {
     storageUnavailableWarning("set", "session storage API missing");
     return;
@@ -44,6 +79,9 @@ export async function setGlobalEnabled(enabled: boolean): Promise<void> {
 }
 
 export async function getGlobalEnabled(): Promise<boolean> {
+  if (storageAccessBlocked) {
+    return true;
+  }
   if (!chrome.storage?.session?.get) {
     storageUnavailableWarning("get", "session storage API missing");
     return true;

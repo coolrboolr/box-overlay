@@ -1,26 +1,8 @@
-export const CANDIDATE_SELECTORS: string[] = [
-  "article",
-  "[role='article']",
-  "section[data-component*='card']",
-  "[data-testid*='card']",
-  "[data-testid*='tile']",
-  "[data-testid*='product']",
-  "[data-module*='card']",
-  "[data-widget*='story']",
-  "div[class*='card']",
-  "div[class*='tile']",
-  ".post",
-  ".feed-item",
-  ".feed-card",
-  ".story-card",
-  ".product-card",
-  ".listing-card"
-];
+import type { SiteProfile } from "./siteProfiles";
 
 const EXCLUDED_TAGS = new Set(["NAV", "HEADER", "FOOTER", "ASIDE", "FORM"]);
-const MIN_TEXT_LENGTH = 50;
 
-export function isLikelyArticleElement(el: Element): boolean {
+export function isLikelyArticleElement(el: Element, profile: SiteProfile): boolean {
   if (EXCLUDED_TAGS.has(el.tagName)) {
     return false;
   }
@@ -28,24 +10,33 @@ export function isLikelyArticleElement(el: Element): boolean {
   const textContent = el.textContent ?? "";
   const normalizedLength = textContent.replace(/\s+/g, " ").trim().length;
 
-  if (normalizedLength < MIN_TEXT_LENGTH) {
+  if (normalizedLength < profile.minTextLength / 1.2) {
     return false;
   }
 
   const className = (el.className || "").toString().toLowerCase();
   if (
-    className.includes("nav") ||
-    className.includes("menu") ||
-    className.includes("footer") ||
-    className.includes("filter") ||
-    className.includes("breadcrumb")
+    profile.blockedClassFragments.some((fragment: string) => className.includes(fragment))
   ) {
     return false;
   }
 
-  const isHidden = el instanceof HTMLElement && (el.offsetParent === null || el.hidden);
-  if (isHidden) {
-    return false;
+  if (el instanceof HTMLElement) {
+    if (!el.isConnected || el.hidden) {
+      return false;
+    }
+    const style = typeof window !== "undefined" && window.getComputedStyle
+      ? window.getComputedStyle(el)
+      : null;
+    if (style) {
+      const hiddenByStyle =
+        style.display === "none" ||
+        style.visibility === "hidden" ||
+        Number.parseFloat(style.opacity ?? "1") === 0;
+      if (hiddenByStyle) {
+        return false;
+      }
+    }
   }
 
   return true;

@@ -9,6 +9,7 @@ const MAX_ITEMS_PER_BATCH = 8;
 let observer: MutationObserver | null = null;
 let scheduled = false;
 let debounceHandle: number | null = null;
+let cleanupHandle: (() => void) | null = null;
 
 function chunk<T>(items: T[], size: number): T[][] {
   const result: T[][] = [];
@@ -16,6 +17,23 @@ function chunk<T>(items: T[], size: number): T[][] {
     result.push(items.slice(i, i + size));
   }
   return result;
+}
+
+function isExtensionContextInvalid(error: unknown): boolean {
+  const message =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? error.message
+        : error && typeof (error as { message?: unknown }).message === "string"
+          ? String((error as { message: unknown }).message)
+          : "";
+  return message.toLowerCase().includes("extension context invalidated");
+}
+
+function stopScanner(): void {
+  cleanupHandle?.();
+  cleanupHandle = null;
 }
 
 async function runScan(callback: (batch: ItemAnalysisRequest[]) => void): Promise<void> {
@@ -30,6 +48,11 @@ async function runScan(callback: (batch: ItemAnalysisRequest[]) => void): Promis
       callback(group);
     }
   } catch (error) {
+    if (isExtensionContextInvalid(error)) {
+      console.info("[content] scanner stopped: extension context invalidated");
+      stopScanner();
+      return;
+    }
     console.error("[content] scan failed", error);
   }
 }
@@ -72,7 +95,7 @@ export function initializeScanner(
     scheduleScan(callback, INITIAL_SCAN_DELAY_MS);
   });
 
-  return () => {
+  const teardown = () => {
     if (observer) {
       observer.disconnect();
       observer = null;
@@ -83,4 +106,15 @@ export function initializeScanner(
     }
     scheduled = false;
   };
+
+  cleanupHandle = teardown;
+
+  return () => {
+    if (cleanupHandle === teardown) {
+      cleanupHandle = null;
+    }
+    teardown();
+  };
 }
+
+export { isExtensionContextInvalid };

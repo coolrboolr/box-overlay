@@ -46,6 +46,29 @@ describe("extractItems", () => {
     const items = await extractItems(document);
     expect(items).toHaveLength(0);
   });
+
+  it("allows shorter text when structured paragraphs exist", async () => {
+    document.body.innerHTML = `
+      <article class="post">
+        <p>Structured paragraphs allow short summaries.</p>
+        <p>This second sentence keeps the length reasonable.</p>
+        <p>Third sentence ensures we exceed the relaxed threshold.</p>
+      </article>
+    `;
+
+    const items = await extractItems(document);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.text.length).toBeGreaterThan(10);
+  });
+
+  it("rejects elements dominated by numbers and symbols", async () => {
+    document.body.innerHTML = `
+      <article class="post">$$$ 1234 $$$ 5678</article>
+    `;
+
+    const items = await extractItems(document);
+    expect(items).toHaveLength(0);
+  });
 });
 
 describe("cleanText", () => {

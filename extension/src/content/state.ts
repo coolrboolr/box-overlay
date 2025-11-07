@@ -9,6 +9,11 @@ function nextId(): string {
   return `item-${idCounter}`;
 }
 
+function setNodeId(node: Element, id: string): void {
+  nodeToId.set(node, id);
+  node.setAttribute(OVERLAY_DATA_ID_ATTR, id);
+}
+
 export function getOrCreateItemId(node: Element): string {
   const existingAttr = node.getAttribute(OVERLAY_DATA_ID_ATTR);
   if (existingAttr) {
@@ -23,9 +28,12 @@ export function getOrCreateItemId(node: Element): string {
   }
 
   const id = nextId();
-  nodeToId.set(node, id);
-  node.setAttribute(OVERLAY_DATA_ID_ATTR, id);
+  setNodeId(node, id);
   return id;
+}
+
+export function assignIdToNode(node: Element, id: string): void {
+  setNodeId(node, id);
 }
 
 export function markProcessed(node: Element): void {

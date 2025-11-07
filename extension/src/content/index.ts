@@ -1,6 +1,7 @@
-import { CANDIDATE_SELECTORS } from "./domSelectors";
 import { initializeScanner } from "./domScan";
-import { getOrCreateItemId } from "./state";
+import { getOrCreateItemId, markProcessed, resetProcessed } from "./state";
+import { extractItems } from "./extract";
+import { getActiveProfile } from "./siteProfiles";
 import {
   clearDismissed,
   forEachOverlay,
@@ -11,6 +12,7 @@ import {
   wasDismissed
 } from "./uiState";
 import { renderOverlay, removeOverlay, updateOverlay } from "./overlay";
+import { clearAnchor, getAnchor } from "./anchors";
 import type {
   ItemAnalysisRequest,
   ItemAnalysisResponse,
@@ -18,7 +20,13 @@ import type {
 } from "../types/messages";
 import { isDev } from "../shared/isDev";
 
+const activeProfile = getActiveProfile();
+const candidateSelector = activeProfile.selectors.join(",");
+
 let overlaysEnabled = true;
+const anchorRetryIds = new Set<string>();
+let anchorRetryCount = 0;
+let rescanInFlight: Promise<boolean> = Promise.resolve(false);
 
 function debug(...args: unknown[]): void {
   if (isDev) {
@@ -78,11 +86,10 @@ function isRuntimeMessage(message: unknown): message is RuntimeMessage {
 }
 
 function findTargetElementById(id: string): Element | null {
-  const selector = CANDIDATE_SELECTORS.join(",");
-  if (!selector) {
+  if (!candidateSelector) {
     return null;
   }
-  const candidates = document.querySelectorAll<Element>(selector);
+  const candidates = document.querySelectorAll<Element>(candidateSelector);
   for (const candidate of candidates) {
     const candidateId = getOrCreateItemId(candidate);
     if (candidateId === id) {
@@ -108,14 +115,25 @@ function hasPayloadChanged(
 
 async function handleAnalyzeResult(payload: ItemAnalysisResponse): Promise<void> {
   const existing = getOverlay(payload.id);
-  const target = existing?.target ?? findTargetElementById(payload.id);
+  const persistedTarget =
+    existing?.target && existing.target.isConnected ? existing.target : null;
+  const anchor = persistedTarget ?? getAnchor(payload.id);
+  const anchorMissing = !anchor || !anchor.isConnected;
+  let target = anchor && anchor.isConnected ? anchor : null;
 
   if (!target) {
-    if (isDev) {
-      debug("no target found for overlay", payload.id);
+    target = findTargetElementById(payload.id);
+  }
+
+  if (!target) {
+    if (existing) {
+      removeOverlay(payload.id);
     }
+    await recoverMissingOverlayTarget(payload.id);
     return;
   }
+
+  anchorRetryIds.delete(payload.id);
 
   if (isDev) {
     debug("handle result", {
@@ -134,7 +152,7 @@ async function handleAnalyzeResult(payload: ItemAnalysisResponse): Promise<void>
 
     if (existing.dismissed && payloadChanged) {
       clearDismissed(payload.id);
-      removeOverlay(payload.id);
+      removeOverlay(payload.id, { releaseAnchor: false });
       renderOverlay(target, payload);
       return;
     }
@@ -152,6 +170,58 @@ async function handleAnalyzeResult(payload: ItemAnalysisResponse): Promise<void>
   }
 
   renderOverlay(target, payload);
+
+  if (anchorMissing) {
+    await recoverMissingOverlayTarget(payload.id);
+  }
+}
+
+async function recoverMissingOverlayTarget(id: string): Promise<void> {
+  if (anchorRetryIds.has(id)) {
+    if (isDev) {
+      console.warn("[content] anchor-miss", id);
+    }
+    return;
+  }
+
+  anchorRetryIds.add(id);
+  anchorRetryCount += 1;
+  if (isDev) {
+    debug("anchor retry", { id, count: anchorRetryCount });
+  }
+
+  clearAnchor(id);
+  const recovered = await queueRescanForIds([id]);
+  if (!recovered && isDev) {
+    console.warn("[content] anchor-miss", id);
+  }
+}
+
+function queueRescanForIds(ids: string[]): Promise<boolean> {
+  const idSet = new Set(ids);
+  const job = async (): Promise<boolean> => {
+    resetProcessed();
+    forEachOverlay((record) => {
+      markProcessed(record.target);
+    });
+
+    const items = await extractItems(document);
+    let matched = false;
+    for (const item of items) {
+      if (idSet.has(item.id)) {
+        matched = true;
+        sendAnalyzeRequest(item);
+      }
+    }
+    return matched;
+  };
+
+  rescanInFlight = rescanInFlight.then(job, job);
+  rescanInFlight = rescanInFlight.catch((error) => {
+    console.error("[content] rescan failed", error);
+    return false;
+  });
+  return rescanInFlight;
 }
 
 async function handleToggleOverlays(): Promise<void> {

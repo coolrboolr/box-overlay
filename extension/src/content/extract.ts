@@ -1,60 +1,116 @@
-import { CANDIDATE_SELECTORS, isLikelyArticleElement } from "./domSelectors";
-import { getOrCreateItemId, isProcessed, markProcessed } from "./state";
+import { isLikelyArticleElement } from "./domSelectors";
+import { assignIdToNode, getOrCreateItemId, isProcessed, markProcessed } from "./state";
+import { rememberAnchor, resolveAnchor } from "./anchors";
+import { getActiveProfile } from "./siteProfiles";
 import type { ItemAnalysisRequest } from "../types/messages";
 
-const MAX_TEXT_LENGTH = 2000;
-const MIN_TEXT_LENGTH = 25;
-const RELAXED_PATTERN = /(feed|story|card|product|listing|tile|article)/i;
+const MAX_TEXT_LENGTH = 1500;
+const STRUCTURE_QUERY = "p,li";
+const MEDIA_QUERY = "img,video";
 
-function matchesRelaxedPatterns(element: Element): boolean {
+const activeProfile = getActiveProfile();
+const candidateSelector = activeProfile.selectors.join(",");
+
+function matchesRelaxedPatterns(element: Element, pattern: RegExp): boolean {
   const attributesToCheck = [
     element.getAttribute("data-testid"),
     element.getAttribute("data-component"),
     element.getAttribute("data-module"),
-    element.getAttribute("data-widget")
+    element.getAttribute("data-widget"),
+    element.getAttribute("data-track")
   ];
 
   return (
-    attributesToCheck.some((value) => Boolean(value && RELAXED_PATTERN.test(value))) ||
-    RELAXED_PATTERN.test((element.className || "").toString())
+    attributesToCheck.some((value) => Boolean(value && pattern.test(value))) ||
+    pattern.test((element.className || "").toString())
   );
 }
 
+function hasEnoughStructure(element: Element): boolean {
+  return element.querySelectorAll(STRUCTURE_QUERY).length >= 3;
+}
+
+function hasMedia(element: Element): boolean {
+  return Boolean(element.querySelector(MEDIA_QUERY));
+}
+
+function computeMinTextLength(
+  hasStructuredContent: boolean,
+  hasMediaContent: boolean,
+  base: number
+): number {
+  if (hasStructuredContent) {
+    return Math.min(base, 20);
+  }
+  if (hasMediaContent) {
+    return Math.min(base, 30);
+  }
+  return base;
+}
+
+function isNumericOrSymbolHeavy(text: string): boolean {
+  const condensed = text.replace(/\s+/g, "");
+  if (!condensed) {
+    return true;
+  }
+  const nonLetters = condensed.replace(/[a-z]/gi, "");
+  return nonLetters.length / condensed.length > 0.4;
+}
+
 export async function extractItems(root: Document | Element): Promise<ItemAnalysisRequest[]> {
-  const selector = CANDIDATE_SELECTORS.join(",");
-  if (!selector) {
+  if (!candidateSelector) {
     return [];
   }
 
-  const candidates = Array.from(root.querySelectorAll<Element>(selector));
+  const candidates = Array.from(root.querySelectorAll<Element>(candidateSelector));
   const tasks = candidates.map(async (element) => {
-    if (isProcessed(element)) {
+    const anchor = resolveAnchor(element);
+    if (isProcessed(anchor)) {
       return null;
     }
 
-    const passesFilters = isLikelyArticleElement(element) || matchesRelaxedPatterns(element);
+    const structuredContent = hasEnoughStructure(element);
+    const mediaContent = hasMedia(element);
+
+    const passesFilters =
+      structuredContent ||
+      isLikelyArticleElement(element, activeProfile) ||
+      matchesRelaxedPatterns(element, activeProfile.relaxedAttributePattern);
     if (!passesFilters) {
       return null;
     }
 
     const text = cleanText(element);
-    if (text.length < MIN_TEXT_LENGTH) {
+    if (!text || isNumericOrSymbolHeavy(text)) {
       return null;
     }
 
-    const id = getOrCreateItemId(element);
+    const minTextLength = computeMinTextLength(
+      structuredContent,
+      mediaContent,
+      activeProfile.minTextLength
+    );
+    if (text.length < minTextLength) {
+      return null;
+    }
+
+    const id = getOrCreateItemId(anchor);
+    if (anchor !== element) {
+      assignIdToNode(element, id);
+    }
+    rememberAnchor(id, anchor);
     const image = await collectImageData(element);
 
-    const item: ItemAnalysisRequest = image
-      ? { id, text, image }
-      : { id, text };
+    const item: ItemAnalysisRequest = image ? { id, text, image } : { id, text };
 
-    markProcessed(element);
+    markProcessed(anchor);
     return item;
   });
 
   const items = await Promise.all(tasks);
-  return items.filter((item): item is ItemAnalysisRequest => item !== null);
+  return items.filter(
+    (item: ItemAnalysisRequest | null): item is ItemAnalysisRequest => item !== null
+  );
 }
 
 export function cleanText(node: Element): string {

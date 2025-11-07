@@ -6,6 +6,7 @@ import {
   removeOverlayRecord,
   updateOverlayRecord
 } from "./uiState";
+import { clearAnchor } from "./anchors";
 
 export const OVERLAY_Z_INDEX = 2147483000;
 const DEFAULT_TAG_LABEL = "Uncategorized";
@@ -57,8 +58,7 @@ function applyCardState(card: HTMLElement, data: ItemAnalysisResponse): void {
 export function renderOverlay(target: Element, data: ItemAnalysisResponse): void {
   const existing = getOverlay(data.id);
   if (existing) {
-    existing.container.remove();
-    removeOverlayRecord(data.id);
+    removeOverlay(data.id, { releaseAnchor: false });
   }
 
   const computed = window.getComputedStyle(target);
@@ -126,11 +126,14 @@ export function updateOverlay(id: string, data: ItemAnalysisResponse): void {
   updateOverlayRecord(id, data);
 }
 
-export function removeOverlay(id: string): void {
+export function removeOverlay(id: string, options?: { releaseAnchor?: boolean }): void {
   const record = getOverlay(id);
   if (!record) {
     return;
   }
   record.container.remove();
   removeOverlayRecord(id);
+  if (options?.releaseAnchor !== false) {
+    clearAnchor(id);
+  }
 }
