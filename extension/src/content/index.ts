@@ -16,20 +16,17 @@ import type {
   ItemAnalysisResponse,
   RuntimeMessage
 } from "../types/messages";
-
-declare const process: {
-  env?: {
-    NODE_ENV?: string;
-  };
-};
-
-const isDev = typeof process !== "undefined" && process.env?.NODE_ENV !== "production";
+import { isDev } from "../shared/isDev";
 
 let overlaysEnabled = true;
 
-if (isDev) {
-  console.debug("[content] loaded", window.location.href);
+function debug(...args: unknown[]): void {
+  if (isDev) {
+    console.info("[content]", ...args);
+  }
 }
+
+debug("loaded", window.location.href);
 
 function shouldIgnoreKeyEvent(event: KeyboardEvent): boolean {
   const target = event.target as HTMLElement | null;
@@ -48,7 +45,7 @@ function shouldIgnoreKeyEvent(event: KeyboardEvent): boolean {
 
 function sendAnalyzeRequest(item: ItemAnalysisRequest): void {
   if (isDev) {
-    console.debug("[content] send analyze", {
+    debug("send analyze", {
       id: item.id,
       textLength: item.text.length,
       hasImage: Boolean(item.image)
@@ -62,7 +59,7 @@ function sendAnalyzeRequest(item: ItemAnalysisRequest): void {
   chrome.runtime.sendMessage(message, () => {
     const err = chrome.runtime.lastError;
     if (err && isDev) {
-      console.debug("[content] sendMessage error (background pending?):", err.message);
+      debug("sendMessage error (background pending?):", err.message);
     }
   });
 }
@@ -115,13 +112,13 @@ async function handleAnalyzeResult(payload: ItemAnalysisResponse): Promise<void>
 
   if (!target) {
     if (isDev) {
-      console.debug("[content] no target found for overlay", payload.id);
+      debug("no target found for overlay", payload.id);
     }
     return;
   }
 
   if (isDev) {
-    console.debug("[content] handle result", {
+    debug("handle result", {
       id: payload.id,
       hasExisting: Boolean(existing)
     });
@@ -164,7 +161,7 @@ async function handleToggleOverlays(): Promise<void> {
     record.container.classList.toggle("llm-overlay-hidden", !shouldShow);
   });
   if (isDev) {
-    console.debug("[content] overlays", overlaysEnabled ? "enabled" : "disabled");
+    debug("overlays", overlaysEnabled ? "enabled" : "disabled");
   }
 }
 
@@ -172,7 +169,7 @@ void (async () => {
   try {
     overlaysEnabled = await getGlobalEnabled();
     if (!overlaysEnabled && isDev) {
-      console.debug("[content] overlays start disabled");
+      debug("overlays start disabled");
     }
   } catch (error) {
     if (isDev) {
@@ -182,13 +179,11 @@ void (async () => {
   }
 })();
 
-if (isDev) {
-  console.debug("[content] initializeScanner start");
-}
+debug("initializeScanner start");
 
 initializeScanner((batch) => {
   if (isDev && batch.length) {
-    console.debug("[content] extracted batch", batch);
+    debug("extracted batch", batch);
   }
   batch.forEach(sendAnalyzeRequest);
 });
@@ -225,9 +220,7 @@ chrome.runtime.onMessage.addListener((message) => {
       void handleAnalyzeResult(message.payload);
       break;
     case "ANALYZE_ERROR":
-      if (isDev) {
-        console.debug("[content] analyze error", message.payload);
-      }
+      debug("analyze error", message.payload);
       break;
     default:
       break;

@@ -8,10 +8,15 @@ import {
 } from "./uiState";
 
 export const OVERLAY_Z_INDEX = 2147483000;
+const DEFAULT_TAG_LABEL = "Uncategorized";
 
 function applyCardState(card: HTMLElement, data: ItemAnalysisResponse): void {
+  const isOrganic = !data.is_ad && Boolean(data.image_tag);
+  const isUncategorized = !data.is_ad && !data.image_tag;
+
   card.classList.toggle("llm-overlay-card--ad", data.is_ad);
-  card.classList.toggle("llm-overlay-card--organic", !data.is_ad);
+  card.classList.toggle("llm-overlay-card--organic", isOrganic);
+  card.classList.toggle("llm-overlay-card--uncategorized", isUncategorized);
 
   const summaryEl = card.querySelector<HTMLElement>(".llm-overlay-summary");
   if (summaryEl) {
@@ -23,14 +28,15 @@ function applyCardState(card: HTMLElement, data: ItemAnalysisResponse): void {
     return;
   }
 
+  const tagText = data.image_tag ?? (isUncategorized ? DEFAULT_TAG_LABEL : "");
   let tagEl = metaEl.querySelector<HTMLElement>(".llm-overlay-tag");
-  if (data.image_tag) {
+  if (tagText) {
     if (!tagEl) {
       tagEl = document.createElement("span");
       tagEl.className = "llm-overlay-tag";
       metaEl.prepend(tagEl);
     }
-    tagEl.textContent = data.image_tag;
+    tagEl.textContent = tagText;
   } else if (tagEl) {
     tagEl.remove();
   }

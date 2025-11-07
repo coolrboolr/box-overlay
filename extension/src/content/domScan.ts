@@ -1,10 +1,10 @@
 import type { ItemAnalysisRequest } from "../types/messages";
 import { extractItems } from "./extract";
 
-const SCAN_DEBOUNCE_MS = 400;
-const INITIAL_SCAN_DELAY_MS = 200;
-const MAX_ITEMS_PER_SCAN = 20;
-const MAX_ITEMS_PER_BATCH = 5;
+const SCAN_DEBOUNCE_MS = 250;
+const INITIAL_SCAN_DELAY_MS = 120;
+const MAX_ITEMS_PER_SCAN = 40;
+const MAX_ITEMS_PER_BATCH = 8;
 
 let observer: MutationObserver | null = null;
 let scheduled = false;

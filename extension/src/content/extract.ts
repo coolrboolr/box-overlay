@@ -2,8 +2,23 @@ import { CANDIDATE_SELECTORS, isLikelyArticleElement } from "./domSelectors";
 import { getOrCreateItemId, isProcessed, markProcessed } from "./state";
 import type { ItemAnalysisRequest } from "../types/messages";
 
-const MAX_TEXT_LENGTH = 1500;
-const MIN_TEXT_LENGTH = 40;
+const MAX_TEXT_LENGTH = 2000;
+const MIN_TEXT_LENGTH = 25;
+const RELAXED_PATTERN = /(feed|story|card|product|listing|tile|article)/i;
+
+function matchesRelaxedPatterns(element: Element): boolean {
+  const attributesToCheck = [
+    element.getAttribute("data-testid"),
+    element.getAttribute("data-component"),
+    element.getAttribute("data-module"),
+    element.getAttribute("data-widget")
+  ];
+
+  return (
+    attributesToCheck.some((value) => Boolean(value && RELAXED_PATTERN.test(value))) ||
+    RELAXED_PATTERN.test((element.className || "").toString())
+  );
+}
 
 export async function extractItems(root: Document | Element): Promise<ItemAnalysisRequest[]> {
   const selector = CANDIDATE_SELECTORS.join(",");
@@ -17,7 +32,8 @@ export async function extractItems(root: Document | Element): Promise<ItemAnalys
       return null;
     }
 
-    if (!isLikelyArticleElement(element)) {
+    const passesFilters = isLikelyArticleElement(element) || matchesRelaxedPatterns(element);
+    if (!passesFilters) {
       return null;
     }
 

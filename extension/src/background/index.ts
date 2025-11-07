@@ -4,18 +4,11 @@ import type {
   ItemAnalysisResponse,
   RuntimeMessage
 } from "../types/messages";
-
-declare const process: {
-  env?: {
-    NODE_ENV?: string;
-  };
-};
-
-const isDev = typeof process !== "undefined" && process.env?.NODE_ENV !== "production";
+import { isDev } from "../shared/isDev";
 
 function debug(...args: unknown[]): void {
   if (isDev) {
-    console.debug("[background]", ...args);
+    console.info("[background]", ...args);
   }
 }
 

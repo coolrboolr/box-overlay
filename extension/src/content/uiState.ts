@@ -1,4 +1,5 @@
 import type { ItemAnalysisResponse } from "../types/messages";
+import { isDev } from "../shared/isDev";
 
 export interface OverlayRecord {
   id: string;
@@ -13,7 +14,6 @@ const dismissedIds = new Set<string>();
 const lastPayloadById = new Map<string, ItemAnalysisResponse>();
 
 const OVERLAY_ENABLED_KEY = "overlayEnabled";
-const isDev = typeof process !== "undefined" && process.env?.NODE_ENV !== "production";
 
 function storageUnavailableWarning(action: string, error: unknown): void {
   if (isDev) {
