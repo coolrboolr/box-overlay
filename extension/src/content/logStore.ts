@@ -46,12 +46,28 @@ let entries: TelemetryEntry[] = [];
 let initialized = false;
 let storageBlocked = false;
 let updateScheduled = false;
+let storageWarningLogged = false;
 const listeners = new Set<() => void>();
 
 const hasChromeStorage =
   typeof chrome !== "undefined" &&
   typeof chrome.storage?.session?.get === "function" &&
   typeof chrome.storage?.session?.set === "function";
+
+function logStorageFallback(message: string, error?: unknown): void {
+  if (!isDev) {
+    return;
+  }
+  if (storageWarningLogged) {
+    return;
+  }
+  storageWarningLogged = true;
+  if (error) {
+    console.debug("[content] telemetry storage fallback:", message, error);
+  } else {
+    console.debug("[content] telemetry storage fallback:", message);
+  }
+}
 
 type StatKey = keyof TelemetryStats;
 const eventToStat: Record<TelemetryEventType, StatKey | null> = {
@@ -88,6 +104,9 @@ function scheduleNotify(): void {
 
 function persist(): void {
   if (!hasChromeStorage || storageBlocked) {
+    if (!hasChromeStorage) {
+      logStorageFallback("chrome.storage.session not available");
+    }
     return;
   }
   const payload = {
@@ -99,21 +118,21 @@ function persist(): void {
       const err = chrome.runtime?.lastError;
       if (err) {
         storageBlocked = true;
-        if (isDev) {
-          console.info("[content] telemetry storage blocked:", err.message);
-        }
+        logStorageFallback("session storage rejected writes", err);
       }
     });
   } catch (error) {
     storageBlocked = true;
-    if (isDev) {
-      console.info("[content] telemetry storage failed:", error);
-    }
+    logStorageFallback("session storage threw synchronously", error);
   }
 }
 
 function loadFromStorage(): void {
   if (!hasChromeStorage || storageBlocked) {
+    if (!hasChromeStorage) {
+      storageBlocked = true;
+      logStorageFallback("chrome.storage.session not available");
+    }
     initialized = true;
     return;
   }
@@ -123,9 +142,7 @@ function loadFromStorage(): void {
       if (err) {
         storageBlocked = true;
         initialized = true;
-        if (isDev) {
-          console.info("[content] telemetry load failed:", err.message);
-        }
+        logStorageFallback("session storage get failed", err);
         return;
       }
       const stored = result?.[STORAGE_KEY];
@@ -143,9 +160,7 @@ function loadFromStorage(): void {
   } catch (error) {
     storageBlocked = true;
     initialized = true;
-    if (isDev) {
-      console.info("[content] telemetry load failed:", error);
-    }
+    logStorageFallback("session storage get threw", error);
   }
 }
 
@@ -189,6 +204,14 @@ export function recordEvent(type: TelemetryEventType, detail?: Record<string, un
 
   scheduleNotify();
   persist();
+}
+
+export function __resetTelemetryStoreForTests(): void {
+  stats = { ...DEFAULT_STATS };
+  entries = [];
+  initialized = false;
+  storageBlocked = false;
+  storageWarningLogged = false;
 }
 
 export function subscribe(listener: () => void): () => void {

@@ -105,6 +105,7 @@ These tools are dev-only (`isDev` builds). They never run in production bundles.
 - **Model latency or failures** — verify `ollama serve` is running, the desired model is pulled, and `OLLAMA_BASE_URL` in `.env` matches the serve address. The server now retries once when Ollama emits invalid JSON before surfacing the error.
 - **No overlays appear** — ensure the server is running, watch for `[content]` logs in the page console, and confirm `Alt+L` hasn’t been used to hide overlays (look for `[content] overlays start disabled`).
 - **Service worker sleeping** — keep the devtools console open for the extension’s background worker to hold it in a running state while debugging queue/concurrency behavior.
+- **Telemetry HUD storage warning** — iframe-heavy sites (BuzzFeed quizzes, embeds) block `chrome.storage.session`. The HUD now falls back to in-memory counters and prints a single debug line; exports remain accurate.
 
 ## SPEC13 Validation Runbook
 

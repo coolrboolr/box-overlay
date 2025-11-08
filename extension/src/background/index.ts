@@ -747,36 +747,37 @@ function emitDevTelemetryEvent(
   });
 }
 
-chrome.runtime.onMessage.addListener((rawMessage, sender) => {
+chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
   if (!rawMessage || typeof rawMessage !== "object") {
-    return;
+    return false;
   }
 
   const message = rawMessage as RuntimeMessage;
 
   if (message.schemaVersion !== SCHEMA_VERSION) {
     logError("Received ANALYZE_REQUEST with mismatched schemaVersion", message.schemaVersion);
-    return;
+    return false;
   }
 
   if (message.type === "DEV_FORCE_REGISTER") {
     void ensureDevOriginRegistration({ force: true });
-    return;
+    sendResponse?.({ status: "re-registering" });
+    return false;
   }
 
   if (message.type !== "ANALYZE_REQUEST") {
-    return;
+    return false;
   }
 
   const tabId = sender.tab?.id;
   if (tabId == null) {
     logError("Received ANALYZE_REQUEST without tabId");
-    return;
+    return false;
   }
 
   if (!isValidRequest(message.payload)) {
     logError("Received invalid ANALYZE_REQUEST payload", message.payload);
-    return;
+    return false;
   }
 
   if (isDev) {
@@ -794,7 +795,9 @@ chrome.runtime.onMessage.addListener((rawMessage, sender) => {
     attempt: 0
   });
 
-  return true;
+  sendResponse?.({ accepted: true });
+
+  return false;
 });
 
 chrome.commands.onCommand.addListener((command) => {

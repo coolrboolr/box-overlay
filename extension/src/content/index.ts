@@ -12,6 +12,7 @@ import {
   getLastRequestPayload,
   getOverlay,
   rememberRequestPayload,
+  markDismissed,
   toggleDockMode as toggleDockModeSetting,
   toggleGlobalEnabled,
   wasDismissed
@@ -38,8 +39,10 @@ const PENDING_SUMMARY = "Analyzing…";
 let overlaysEnabled = true;
 let dockEnabled = false;
 const anchorRetryIds = new Set<string>();
+const anchorRetryAttempts = new Map<string, number>();
 let anchorRetryCount = 0;
 let rescanInFlight: Promise<boolean> = Promise.resolve(false);
+const MAX_ANCHOR_RECOVER_ATTEMPTS = 3;
 
 function debug(...args: unknown[]): void {
   if (isDev) {
@@ -170,6 +173,7 @@ async function handleAnalyzeResult(payload: ItemAnalysisResponse): Promise<void>
   }
 
   anchorRetryIds.delete(payload.id);
+  anchorRetryAttempts.delete(payload.id);
 
   if (isDev) {
     debug("handle result", {
@@ -277,24 +281,47 @@ function formatErrorMessage(payload: AnalyzeError): string {
 }
 
 async function recoverMissingOverlayTarget(id: string): Promise<void> {
-  if (anchorRetryIds.has(id)) {
+  const attempts = anchorRetryAttempts.get(id) ?? 0;
+  if (attempts >= MAX_ANCHOR_RECOVER_ATTEMPTS) {
     if (isDev) {
-      console.warn("[content] anchor-miss", id);
+      console.warn("[content] anchor-miss-cap", { id, attempts });
     }
     return;
   }
 
+  if (anchorRetryIds.has(id)) {
+    return;
+  }
+
+  const nextAttempt = attempts + 1;
   anchorRetryIds.add(id);
+  anchorRetryAttempts.set(id, nextAttempt);
   anchorRetryCount += 1;
-  recordEvent("retry", { reason: "anchor", id });
+  recordEvent("retry", { reason: "anchor", id, attempt: nextAttempt });
   if (isDev) {
-    debug("anchor retry", { id, count: anchorRetryCount });
+    debug("anchor retry", { id, count: anchorRetryCount, attempt: nextAttempt });
   }
 
   clearAnchor(id);
-  const recovered = await queueRescanForIds([id]);
-  if (!recovered && isDev) {
-    console.warn("[content] anchor-miss", id);
+
+  try {
+    const recovered = await queueRescanForIds([id]);
+    if (recovered) {
+      anchorRetryAttempts.delete(id);
+      return;
+    }
+
+    if (isDev) {
+      console.warn("[content] anchor-miss", { id, attempt: nextAttempt });
+    }
+
+    if (nextAttempt >= MAX_ANCHOR_RECOVER_ATTEMPTS) {
+      removeOverlay(id);
+      markDismissed(id);
+      recordEvent("error", { id, reason: "anchor-miss-max" });
+    }
+  } finally {
+    anchorRetryIds.delete(id);
   }
 }
 

@@ -78,16 +78,19 @@ describe("background pipeline", () => {
 
     const onMessageHandler = chromeMock.runtime.onMessage.addListener.mock.calls[0][0];
 
+    const sendResponse = vi.fn();
     const handled = onMessageHandler(
       {
         schemaVersion: SCHEMA_VERSION,
         type: "ANALYZE_REQUEST",
         payload: { schemaVersion: SCHEMA_VERSION, id: "item-1", text: "Test article body" }
       },
-      { tab: { id: 99 } } as chrome.runtime.MessageSender
+      { tab: { id: 99 } } as chrome.runtime.MessageSender,
+      sendResponse
     );
 
-    expect(handled).toBe(true);
+    expect(handled).toBe(false);
+    expect(sendResponse).toHaveBeenCalledWith({ accepted: true });
 
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(2);

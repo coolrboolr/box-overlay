@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { SCHEMA_VERSION, type RuntimeMessage } from "../types/messages";
+import { __resetTelemetryStoreForTests, getEntries } from "../content/logStore";
 
 function createChromeContentMock() {
   const sendMessage = vi.fn((message: unknown, responseCallback?: () => void) => {
@@ -62,6 +63,7 @@ describe("content pipeline", () => {
     vi.resetModules();
     chromeMock = createChromeContentMock();
     (globalThis as any).chrome = chromeMock;
+    __resetTelemetryStoreForTests();
     document.body.innerHTML = `
       <main>
         <article class="post">
@@ -190,5 +192,48 @@ describe("content pipeline", () => {
     await Promise.resolve();
 
     expect(chromeMock.runtime.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps anchor recovery attempts and records a terminal failure", async () => {
+    await import("../content/index");
+
+    const listener = chromeMock.runtime.onMessage.addListener.mock.calls[0][0];
+    const article = document.querySelector("article");
+    const id = "item-churn";
+    article?.setAttribute("data-llm-overlay-id", id);
+
+    listener({
+      schemaVersion: SCHEMA_VERSION,
+      type: "ANALYZE_RESULT",
+      payload: {
+        id,
+        summary: "Initial summary",
+        is_ad: false
+      }
+    });
+
+    article?.remove();
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      listener({
+        schemaVersion: SCHEMA_VERSION,
+        type: "ANALYZE_RESULT",
+        payload: {
+          id,
+          summary: `Update ${attempt}`,
+          is_ad: false
+        }
+      });
+      await Promise.resolve();
+    }
+
+    const entries = getEntries();
+    const retryEvents = entries.filter((entry) => entry.type === "retry" && entry.detail?.reason === "anchor");
+    expect(retryEvents.length).toBeGreaterThan(0);
+
+    const terminalError = entries.find(
+      (entry) => entry.type === "error" && entry.detail?.reason === "anchor-miss-max"
+    );
+    expect(terminalError).toBeTruthy();
   });
 });
