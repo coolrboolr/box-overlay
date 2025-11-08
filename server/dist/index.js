@@ -6,8 +6,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const cors_1 = __importDefault(require("cors"));
 const express_1 = __importDefault(require("express"));
 const schema_1 = require("./schema");
-const ollamaClient_1 = require("./ollamaClient");
 const env_1 = require("./env");
+const analyzeService_1 = require("./analyzeService");
+const analyzeBatch_1 = require("./routes/analyzeBatch");
+const errors_1 = require("./utils/errors");
 const HOST = "127.0.0.1";
 const JSON_LIMIT = "2mb";
 const app = (0, express_1.default)();
@@ -18,6 +20,9 @@ if (env_1.env.enableDevExtensionRegistration) {
     app.post("/api/dev/register-extension-origin", registerExtensionOriginHandler);
 }
 app.use(buildCorsMiddleware(dynamicExtensionOrigins));
+if (env_1.env.enableBatchAnalyze) {
+    app.use((0, analyzeBatch_1.createAnalyzeBatchRouter)());
+}
 const healthHandler = (_req, res) => {
     res.json({ status: "ok", model: env_1.env.OLLAMA_MODEL, mock: env_1.env.MOCK_OLLAMA });
 };
@@ -43,7 +48,7 @@ app.post("/api/analyze", async (req, res) => {
             textLength: payload.text.length,
             hasImage: Boolean(payload.image)
         });
-        const result = await analyzeRequest(payload);
+        const result = await (0, analyzeService_1.analyzeRequest)(payload);
         return res.json(result);
     }
     catch (error) {
@@ -54,7 +59,7 @@ app.post("/api/analyze", async (req, res) => {
         const errorPayload = schema_1.ErrorResponseSchema.parse({
             error: "INTERNAL_ERROR",
             message: "Failed to analyze content",
-            details: process.env.NODE_ENV === "development" ? formatErrorDetails(error) : undefined
+            details: process.env.NODE_ENV === "development" ? (0, errors_1.formatErrorDetails)(error) : undefined
         });
         return res.status(500).json(errorPayload);
     }
@@ -64,7 +69,7 @@ const errorHandler = (err, _req, res, _next) => {
     const errorPayload = schema_1.ErrorResponseSchema.parse({
         error: "INTERNAL_ERROR",
         message: "Internal server error",
-        details: process.env.NODE_ENV === "development" ? formatErrorDetails(err) : undefined
+        details: process.env.NODE_ENV === "development" ? (0, errors_1.formatErrorDetails)(err) : undefined
     });
     res.status(500).json(errorPayload);
 };
@@ -78,15 +83,6 @@ process.on("SIGINT", () => {
         process.exit(0);
     });
 });
-async function analyzeRequest(payload) {
-    const response = await (0, ollamaClient_1.callOllama)(payload, {
-        model: env_1.env.OLLAMA_MODEL,
-        baseUrl: env_1.env.OLLAMA_BASE_URL,
-        timeoutMs: env_1.env.OLLAMA_TIMEOUT_MS,
-        mock: env_1.env.MOCK_OLLAMA
-    });
-    return schema_1.ItemAnalysisResponseSchema.parse(response);
-}
 function buildCorsMiddleware(dynamicOrigins) {
     return (0, cors_1.default)({
         origin(origin, callback) {
@@ -145,14 +141,5 @@ function normalizeExtensionId(value) {
         return `chrome-extension://${trimmed}`;
     }
     return null;
-}
-function formatErrorDetails(error) {
-    if (error instanceof Error) {
-        return {
-            message: error.message,
-            stack: error.stack
-        };
-    }
-    return error;
 }
 //# sourceMappingURL=index.js.map

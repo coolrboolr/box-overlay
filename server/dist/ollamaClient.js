@@ -3,9 +3,19 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.callOllama = callOllama;
 const schema_1 = require("./schema");
 const env_1 = require("./env");
+const prompt_1 = require("./prompt");
 const DEFAULT_MODEL = "llama3";
 const DEFAULT_BASE_URL = "http://127.0.0.1:11434";
 const DEFAULT_TIMEOUT_MS = 20000;
+class OllamaParseError extends Error {
+    constructor(message, cause) {
+        super(message);
+        this.name = "OllamaParseError";
+        if (cause !== undefined) {
+            this.cause = cause;
+        }
+    }
+}
 async function callOllama(input, config) {
     const shouldMock = config.mock ?? env_1.env.MOCK_OLLAMA;
     if (shouldMock) {
@@ -13,70 +23,69 @@ async function callOllama(input, config) {
     }
     const model = config.model || env_1.env.OLLAMA_MODEL || DEFAULT_MODEL;
     const baseUrl = (config.baseUrl ?? env_1.env.OLLAMA_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/$/, "");
-    const timeoutMs = config.timeoutMs ??
-        env_1.env.OLLAMA_TIMEOUT_MS ??
-        DEFAULT_TIMEOUT_MS;
+    const timeoutMs = config.timeoutMs ?? env_1.env.OLLAMA_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS;
+    const hasImage = Boolean(input.image);
+    const sharedImageData = extractImageData(input.image);
+    const basePrompt = (0, prompt_1.buildPrompt)({ text: input.text, hasImage });
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
-        const prompt = buildPrompt(input);
-        const payload = {
-            model,
-            prompt,
-            format: "json",
-            stream: false
+        const runWithPrompt = async (prompt) => {
+            const requestPayload = {
+                model,
+                prompt,
+                format: "json",
+                stream: false
+            };
+            if (sharedImageData) {
+                requestPayload.images = [sharedImageData];
+            }
+            const url = `${baseUrl}/api/generate`;
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(requestPayload),
+                signal: controller.signal
+            });
+            if (!response.ok) {
+                throw new Error(`Ollama returned HTTP ${response.status}`);
+            }
+            const json = (await response.json());
+            const parsed = parseOllamaResponse(json);
+            const normalized = normalizeResponse(parsed, input);
+            return schema_1.ItemAnalysisResponseSchema.parse(normalized);
         };
-        const imageData = extractImageData(input.image);
-        if (imageData) {
-            payload.images = [imageData];
+        const handleFailure = async (error, attemptedStrict) => {
+            if (!attemptedStrict && error instanceof OllamaParseError) {
+                const strictPrompt = (0, prompt_1.buildPrompt)({ text: input.text, hasImage, retry: true });
+                try {
+                    return await runWithPrompt(strictPrompt);
+                }
+                catch (strictError) {
+                    return handleFailure(strictError, true);
+                }
+            }
+            if (env_1.env.MOCK_OLLAMA_FALLBACK) {
+                console.warn("[server] Ollama call failed, falling back to mock:", error);
+                return mockResponse(input);
+            }
+            throw error;
+        };
+        try {
+            return await runWithPrompt(basePrompt);
         }
-        const url = `${baseUrl}/api/generate`;
-        const response = await fetch(url, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify(payload),
-            signal: controller.signal
-        });
-        if (!response.ok) {
-            throw new Error(`Ollama returned HTTP ${response.status}`);
+        catch (error) {
+            return handleFailure(error, false);
         }
-        const json = (await response.json());
-        const parsed = parseOllamaResponse(json);
-        const normalized = normalizeResponse(parsed, input);
-        return schema_1.ItemAnalysisResponseSchema.parse(normalized);
     }
     catch (error) {
-        if (env_1.env.MOCK_OLLAMA_FALLBACK) {
-            console.warn("[server] Ollama call failed, falling back to mock:", error);
-            return mockResponse(input);
-        }
         throw error;
     }
     finally {
         clearTimeout(timeoutId);
     }
-}
-function buildPrompt(input) {
-    const instructions = [
-        "You are a local assistant that summarizes content and identifies ads.",
-        "Summarize the provided text in 1-2 sentences.",
-        "If an image description is included, produce a 2-3 word tag describing it.",
-        "Decide if the content is likely an advertisement. Return a JSON object with keys summary, image_tag, and is_ad."
-    ];
-    const segments = [
-        instructions.join(" "),
-        "TEXT:",
-        input.text.trim()
-    ];
-    if (input.image) {
-        segments.push("IMAGE_PROVIDED: true");
-    }
-    else {
-        segments.push("IMAGE_PROVIDED: false");
-    }
-    return segments.join("\n\n");
 }
 function extractImageData(image) {
     if (!image) {
@@ -102,15 +111,13 @@ function parseOllamaResponse(payload) {
             return JSON.parse(response);
         }
         catch (error) {
-            const parseError = new Error("Ollama response could not be parsed as JSON");
-            parseError.cause = error;
-            throw parseError;
+            throw new OllamaParseError("Ollama response could not be parsed as JSON", error);
         }
     }
     if (typeof response === "object" && response !== null) {
         return response;
     }
-    throw new Error("Ollama response missing `response` field");
+    throw new OllamaParseError("Ollama response missing `response` field");
 }
 function normalizeResponse(raw, input) {
     if (typeof raw !== "object" || raw === null) {
