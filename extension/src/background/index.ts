@@ -2,6 +2,7 @@ import type {
   BatchAnalysisResponse,
   BatchAnalysisResult,
   AnalyzeError,
+  DevTelemetryEventName,
   ItemAnalysisRequest,
   ItemAnalysisResponse,
   RuntimeMessage
@@ -69,6 +70,46 @@ let devOriginRegistered = false;
 let registerOriginPromise: Promise<void> | null = null;
 let batchEndpointAvailable = ENABLE_BATCH_MODE;
 
+interface BackendRequestOptions {
+  onForbiddenRecovery?: () => void;
+}
+
+function isForbiddenStatus(statusCode?: number): boolean {
+  return statusCode === 401 || statusCode === 403;
+}
+
+function resetDevOriginState(): void {
+  devOriginRegistered = false;
+  registerOriginPromise = null;
+}
+
+async function withDevRegistrationRetry<T>(
+  operation: () => Promise<T>,
+  context: string,
+  onRecovery?: () => void
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    const backendError = error instanceof BackendRequestError ? error : null;
+    if (!backendError || !isForbiddenStatus(backendError.statusCode)) {
+      throw error;
+    }
+
+    debug("forcing dev origin re-registration after forbidden response", {
+      context,
+      status: backendError.statusCode
+    });
+
+    resetDevOriginState();
+    await ensureDevOriginRegistration({ force: true });
+
+    const result = await operation();
+    onRecovery?.();
+    return result;
+  }
+}
+
 function enqueueJob(item: QueueItem): void {
   queue.push(item);
   debug("enqueue job", item.request.id, "attempt", item.attempt);
@@ -126,7 +167,14 @@ function dequeueBatchItems(): QueueItem[] {
 
 async function handleJob(item: QueueItem): Promise<void> {
   try {
-    const response = await sendToBackend(item.request);
+    const response = await sendToBackend(item.request, {
+      onForbiddenRecovery: () => {
+        emitDevTelemetryEvent(item.tabId, item.frameId, "FORBIDDEN_RECOVERY", {
+          id: item.request.id,
+          mode: "single"
+        });
+      }
+    });
     debug("job success", item.request.id);
     emitAnalyzeResult(item, response);
   } catch (error) {
@@ -197,13 +245,27 @@ async function handleBatchJob(items: QueueItem[]): Promise<void> {
   }
 
   try {
-    const response = await sendBatchToBackend(items);
+    const response = await sendBatchToBackend(items, {
+      onForbiddenRecovery: () => {
+        items.forEach((job) => {
+          emitDevTelemetryEvent(job.tabId, job.frameId, "FORBIDDEN_RECOVERY", {
+            id: job.request.id,
+            mode: "batch"
+          });
+        });
+      }
+    });
     routeBatchResults(items, response);
   } catch (error) {
     const backendError = error instanceof BackendRequestError ? error : undefined;
     if (backendError?.statusCode === 404) {
       batchEndpointAvailable = false;
-      items.forEach((item) => enqueueJob(item));
+      items.forEach((item) => {
+        emitDevTelemetryEvent(item.tabId, item.frameId, "BATCH_FALLBACK", {
+          ids: items.map((entry) => entry.request.id)
+        });
+        enqueueJob(item);
+      });
       return;
     }
 
@@ -259,7 +321,19 @@ function routeBatchResults(items: QueueItem[], response: BatchAnalysisResponse):
   });
 }
 
-async function sendBatchToBackend(items: QueueItem[]): Promise<BatchAnalysisResponse> {
+async function sendBatchToBackend(
+  items: QueueItem[],
+  options?: BackendRequestOptions
+): Promise<BatchAnalysisResponse> {
+  const context = `batch:${items.map((item) => item.request.id).join(",")}`;
+  return withDevRegistrationRetry(
+    () => performBatchRequest(items),
+    context,
+    options?.onForbiddenRecovery
+  );
+}
+
+async function performBatchRequest(items: QueueItem[]): Promise<BatchAnalysisResponse> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -282,7 +356,7 @@ async function sendBatchToBackend(items: QueueItem[]): Promise<BatchAnalysisResp
         signal: controller.signal
       });
     } catch (networkError) {
-      devOriginRegistered = false;
+      resetDevOriginState();
       throw networkError;
     }
 
@@ -294,7 +368,9 @@ async function sendBatchToBackend(items: QueueItem[]): Promise<BatchAnalysisResp
     }
 
     if (!response.ok) {
-      const retryable = response.status >= 500 || response.status === 429;
+      const retryable = isForbiddenStatus(response.status)
+        ? true
+        : response.status >= 500 || response.status === 429;
       let details: string | undefined;
       try {
         details = (await response.text()) || undefined;
@@ -304,7 +380,7 @@ async function sendBatchToBackend(items: QueueItem[]): Promise<BatchAnalysisResp
       throw new BackendRequestError(`Batch endpoint responded with HTTP ${response.status}`, {
         retryable,
         statusCode: response.status,
-        details
+        details: isForbiddenStatus(response.status) ? "FORBIDDEN_ORIGIN" : details
       });
     }
 
@@ -341,7 +417,19 @@ async function sendBatchToBackend(items: QueueItem[]): Promise<BatchAnalysisResp
   }
 }
 
-async function sendToBackend(request: ItemAnalysisRequest): Promise<ItemAnalysisResponse> {
+async function sendToBackend(
+  request: ItemAnalysisRequest,
+  options?: BackendRequestOptions
+): Promise<ItemAnalysisResponse> {
+  const context = `single:${request.id}`;
+  return withDevRegistrationRetry(
+    () => performSingleRequest(request),
+    context,
+    options?.onForbiddenRecovery
+  );
+}
+
+async function performSingleRequest(request: ItemAnalysisRequest): Promise<ItemAnalysisResponse> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -367,12 +455,14 @@ async function sendToBackend(request: ItemAnalysisRequest): Promise<ItemAnalysis
         signal: controller.signal
       });
     } catch (networkError) {
-      devOriginRegistered = false;
+      resetDevOriginState();
       throw networkError;
     }
 
     if (!response.ok) {
-      const retryable = response.status >= 500 || response.status === 429;
+      const retryable = isForbiddenStatus(response.status)
+        ? true
+        : response.status >= 500 || response.status === 429;
       let details: string | undefined;
       try {
         details = (await response.text()) || undefined;
@@ -382,7 +472,7 @@ async function sendToBackend(request: ItemAnalysisRequest): Promise<ItemAnalysis
       throw new BackendRequestError(`Backend responded with HTTP ${response.status}`, {
         retryable,
         statusCode: response.status,
-        details
+        details: isForbiddenStatus(response.status) ? "FORBIDDEN_ORIGIN" : details
       });
     }
 
@@ -551,12 +641,18 @@ function getExtensionId(): string | null {
   }
 }
 
-async function ensureDevOriginRegistration(): Promise<void> {
-  if (devOriginRegistered) {
+interface EnsureRegistrationOptions {
+  force?: boolean;
+}
+
+async function ensureDevOriginRegistration(
+  options: EnsureRegistrationOptions = {}
+): Promise<void> {
+  if (!options.force && devOriginRegistered) {
     return;
   }
 
-  if (registerOriginPromise) {
+  if (!options.force && registerOriginPromise) {
     return registerOriginPromise;
   }
 
@@ -566,16 +662,26 @@ async function ensureDevOriginRegistration(): Promise<void> {
     return;
   }
 
+  if (options.force) {
+    registerOriginPromise = null;
+  }
+
+  if (registerOriginPromise) {
+    return registerOriginPromise;
+  }
+
   const url = `${REGISTER_ORIGIN_ENDPOINT}?id=${encodeURIComponent(extensionId)}`;
   registerOriginPromise = fetch(url, {
     method: "POST",
-    mode: "no-cors",
     keepalive: true
   })
-    .then(() => {
-      devOriginRegistered = true;
+    .then((response) => {
+      devOriginRegistered = response.ok;
       if (isDev) {
-        debug("requested dev origin registration", extensionId);
+        debug(
+          response.ok ? "requested dev origin registration" : "dev origin registration failed",
+          response.ok ? extensionId : response.status
+        );
       }
     })
     .catch((error) => {
@@ -625,6 +731,22 @@ function sendResultToTab(
   }
 }
 
+function emitDevTelemetryEvent(
+  tabId: number,
+  frameId: number | undefined,
+  event: DevTelemetryEventName,
+  detail?: Record<string, unknown>
+): void {
+  sendResultToTab(tabId, frameId, {
+    schemaVersion: SCHEMA_VERSION,
+    type: "DEV_TELEMETRY_EVENT",
+    payload: {
+      event,
+      detail
+    }
+  });
+}
+
 chrome.runtime.onMessage.addListener((rawMessage, sender) => {
   if (!rawMessage || typeof rawMessage !== "object") {
     return;
@@ -634,6 +756,11 @@ chrome.runtime.onMessage.addListener((rawMessage, sender) => {
 
   if (message.schemaVersion !== SCHEMA_VERSION) {
     logError("Received ANALYZE_REQUEST with mismatched schemaVersion", message.schemaVersion);
+    return;
+  }
+
+  if (message.type === "DEV_FORCE_REGISTER") {
+    void ensureDevOriginRegistration({ force: true });
     return;
   }
 
@@ -691,8 +818,17 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
+  resetDevOriginState();
   debug("service worker installed");
+  void ensureDevOriginRegistration({ force: true });
 });
+
+if (typeof globalThis.addEventListener === "function") {
+  globalThis.addEventListener("activate", () => {
+    resetDevOriginState();
+    void ensureDevOriginRegistration({ force: true });
+  });
+}
 
 debug("service worker initialized");
 void ensureDevOriginRegistration();

@@ -29,6 +29,13 @@ export interface AnalyzeError {
   details?: string;
 }
 
+export type DevTelemetryEventName = "FORBIDDEN_RECOVERY" | "BATCH_FALLBACK";
+
+export interface DevTelemetryEventPayload {
+  event: DevTelemetryEventName;
+  detail?: Record<string, unknown>;
+}
+
 export interface BatchAnalysisRequest {
   schemaVersion: typeof SCHEMA_VERSION;
   items: ItemAnalysisRequest[];
@@ -54,4 +61,6 @@ export type RuntimeMessage =
   | RuntimeMessageBase<"ANALYZE_RESULT", ItemAnalysisResponse>
   | RuntimeMessageBase<"ANALYZE_ERROR", AnalyzeError>
   | RuntimeMessageBase<"ANALYZE_BATCH_RESULT", BatchAnalysisResponse>
-  | RuntimeMessageBase<"TOGGLE_OVERLAYS", undefined>;
+  | RuntimeMessageBase<"TOGGLE_OVERLAYS", undefined>
+  | RuntimeMessageBase<"DEV_TELEMETRY_EVENT", DevTelemetryEventPayload>
+  | RuntimeMessageBase<"DEV_FORCE_REGISTER", undefined>;

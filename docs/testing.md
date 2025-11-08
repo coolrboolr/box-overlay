@@ -76,6 +76,8 @@ These tools are dev-only (`isDev` builds). They never run in production bundles.
    - Add/remove feed cards and simulate React-style re-renders.
    - Toggle dock mode / global overlays (fires the same keyboard shortcuts).
    - Inject failures (“Fail next request”) and adjust the mock response delay.
+   - Inspect backend health + origin registry via the new **Backend Status** panel.
+   - Invoke the real background worker’s re-registration hook or simulate a backend restart without leaving the page.
 4. Recommended QA sweep:
    - Confirm pending overlays show “Analyzing…” with spinner right after a card spawns.
    - Toggle the failure checkbox and use the inline “Retry” button to ensure errors resubmit successfully.
@@ -103,3 +105,25 @@ These tools are dev-only (`isDev` builds). They never run in production bundles.
 - **Model latency or failures** — verify `ollama serve` is running, the desired model is pulled, and `OLLAMA_BASE_URL` in `.env` matches the serve address. The server now retries once when Ollama emits invalid JSON before surfacing the error.
 - **No overlays appear** — ensure the server is running, watch for `[content]` logs in the page console, and confirm `Alt+L` hasn’t been used to hide overlays (look for `[content] overlays start disabled`).
 - **Service worker sleeping** — keep the devtools console open for the extension’s background worker to hold it in a running state while debugging queue/concurrency behavior.
+
+## SPEC13 Validation Runbook
+
+1. **Start the backend.**
+   ```bash
+   cd server
+   npm run dev
+   ```
+   Leave `ENABLE_DEV_EXTENSION_REGISTRATION=true` and `ALLOWED_EXTENSION_IDS=` in `.env` so dynamic origin registration is used.
+2. **Run the smoke script** from another terminal to ensure `/api/analyze` is healthy and print the current registry path:
+   ```bash
+   npm run smoke:dev
+   ```
+3. **Launch the extension harness.** In Chrome, open `chrome-extension://<id>/static/harness/index.html`.
+4. **Use the Backend Status panel** at the top of the harness to:
+   - Refresh `/api/health` and `/api/dev/allowed-extension-origins`.
+   - Click “Simulate backend restart” (calls `POST /api/dev/clear-extension-origins`).
+   - Click “Force re-register” to ping the background worker via `DEV_FORCE_REGISTER`.
+   - Watch the “Recent Requests” log (last five requests with retryable flag).
+5. **Trigger overlay work** by adding cards in the harness and verifying the content script talks to the mock backend without 403 errors. Toggle `ENABLE_BATCH=true` in the terminal (restart `npm run watch`) and ensure the queue falls back gracefully when `/api/analyze/batch` is disabled.
+6. **Export HUD telemetry** (Alt+Shift+L) after simulating backend restarts. Confirm the HUD now surfaces the additional counters (`403 recoveries`, `Forbidden errors`, `Batch fallbacks`). Attach the exported JSON and the server log snippet showing `registered dev extension origin` in your PR.
+7. **Optional:** run `node server/scripts/inspect-dev-origins.mjs` to print the persisted registry file before/after the restart simulation.

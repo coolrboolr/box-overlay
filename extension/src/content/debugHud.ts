@@ -9,7 +9,10 @@ const STAT_LABELS: Record<StatKey, string> = {
   requestsQueued: "Requests queued",
   overlaysResolved: "Overlays resolved",
   retries: "Retries",
-  errors: "Errors"
+  errors: "Errors",
+  forbiddenRecoveries: "403 recoveries",
+  forbiddenErrors: "Forbidden errors",
+  batchFallbacks: "Batch fallbacks"
 };
 
 let root: HTMLElement | null = null;

@@ -23,7 +23,8 @@ import {
   type ItemAnalysisRequest,
   type ItemAnalysisResponse,
   type AnalyzeError,
-  type RuntimeMessage
+  type RuntimeMessage,
+  type DevTelemetryEventPayload
 } from "../types/messages";
 import { isDev } from "../shared/isDev";
 import { exportLogs, initTelemetryStore, recordEvent } from "./logStore";
@@ -115,7 +116,8 @@ function isRuntimeMessage(message: unknown): message is RuntimeMessage {
     candidate.type === "ANALYZE_RESULT" ||
     candidate.type === "ANALYZE_ERROR" ||
     candidate.type === "ANALYZE_BATCH_RESULT" ||
-    candidate.type === "TOGGLE_OVERLAYS"
+    candidate.type === "TOGGLE_OVERLAYS" ||
+    candidate.type === "DEV_TELEMETRY_EVENT"
   );
 }
 
@@ -217,8 +219,17 @@ function handleAnalyzeError(payload: AnalyzeError): void {
   recordEvent("error", {
     id: payload.id,
     retryable: payload.retryable,
-    message: payload.error
+    message: payload.error,
+    statusCode: payload.statusCode,
+    details: payload.details
   });
+
+  if (payload.details === "FORBIDDEN_ORIGIN") {
+    recordEvent("forbidden-error", {
+      id: payload.id,
+      statusCode: payload.statusCode
+    });
+  }
   const target = getAnchor(payload.id) ?? findTargetElementById(payload.id);
   if (!target) {
     if (isDev) {
@@ -479,7 +490,22 @@ chrome.runtime.onMessage.addListener((message) => {
     case "ANALYZE_ERROR":
       handleAnalyzeError(message.payload);
       break;
+    case "DEV_TELEMETRY_EVENT":
+      handleDevTelemetryEvent(message.payload);
+      break;
     default:
       break;
   }
 });
+function handleDevTelemetryEvent(payload: DevTelemetryEventPayload): void {
+  switch (payload.event) {
+    case "FORBIDDEN_RECOVERY":
+      recordEvent("forbidden-recovery", payload.detail);
+      break;
+    case "BATCH_FALLBACK":
+      recordEvent("batch-fallback", payload.detail);
+      break;
+    default:
+      break;
+  }
+}

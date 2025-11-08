@@ -124,6 +124,54 @@
         background: #fff;
         box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
       }
+      .backend-panel {
+        margin-top: 24px;
+        background: #fff;
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.15);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .backend-panel h3 {
+        margin: 0;
+        font-size: 14px;
+        color: #0f172a;
+      }
+      .backend-panel .status-line {
+        margin: 0;
+        font-size: 13px;
+        color: #1f2937;
+      }
+      .backend-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .backend-actions button {
+        flex: 1 1 auto;
+      }
+      .request-log-wrapper {
+        border-top: 1px solid rgba(15, 23, 42, 0.08);
+        padding-top: 12px;
+      }
+      .request-log {
+        list-style: none;
+        margin: 8px 0 0;
+        padding: 0;
+        font-size: 12px;
+        color: #374151;
+      }
+      .request-log li {
+        display: flex;
+        justify-content: space-between;
+        padding: 4px 0;
+        border-bottom: 1px dashed rgba(15, 23, 42, 0.08);
+      }
+      .request-log li:last-child {
+        border-bottom: none;
+      }
       .instructions ul {
         padding-left: 20px;
         margin: 8px 0 0;
@@ -183,6 +231,22 @@
       </p>
     </section>
 
+    <section class="backend-panel">
+      <h2>Backend Status</h2>
+      <p id="backend-health" class="status-line">Checking…</p>
+      <p id="backend-origins" class="status-line">Fetching origin info…</p>
+      <div class="backend-actions">
+        <button id="refresh-backend">Refresh status</button>
+        <button id="simulate-restart" class="secondary">Simulate backend restart</button>
+        <button id="force-register" class="secondary">Force re-register</button>
+      </div>
+      <p id="backend-note" class="hud-note"></p>
+      <div class="request-log-wrapper">
+        <h3>Recent Requests</h3>
+        <ul id="request-log" class="request-log"></ul>
+      </div>
+    </section>
+
     <section class="instructions">
       <h2>QA Checklist</h2>
       <ul>
@@ -211,8 +275,16 @@
 
     <script>
       (() => {
+        const API_BASE_URL = "http://127.0.0.1:5000";
+        const nativeRuntime = window.chrome?.runtime ?? null;
         const storageState = new Map();
         const messageListeners = new Set();
+        const requestLog = [];
+
+        const backendHealthEl = document.getElementById("backend-health");
+        const backendOriginsEl = document.getElementById("backend-origins");
+        const backendNoteEl = document.getElementById("backend-note");
+        const requestLogEl = document.getElementById("request-log");
 
         function normalizeKeys(input) {
           if (Array.isArray(input)) {
@@ -225,6 +297,111 @@
             return Object.keys(input);
           }
           return [];
+        }
+
+        function appendRequestLog(entry) {
+          requestLog.push(entry);
+          while (requestLog.length > 5) {
+            requestLog.shift();
+          }
+          if (requestLogEl) {
+            requestLogEl.innerHTML = "";
+            requestLog.forEach((item) => {
+              const li = document.createElement("li");
+              const suffix = item.retryable ? " (retryable)" : "";
+              li.innerHTML = `<span>${item.id}</span><span>${item.status}${suffix}</span>`;
+              requestLogEl.appendChild(li);
+            });
+          }
+        }
+
+        function setBackendNote(message, isError = false) {
+          if (backendNoteEl) {
+            backendNoteEl.textContent = message;
+            backendNoteEl.style.color = isError ? "#dc2626" : "#6b7280";
+          }
+        }
+
+        async function fetchJson(path, options) {
+          const response = await fetch(`${API_BASE_URL}${path}`, options);
+          if (!response.ok) {
+            const text = await response.text();
+            throw new Error(text || `HTTP ${response.status}`);
+          }
+          if (response.status === 204) {
+            return null;
+          }
+          return await response.json();
+        }
+
+        async function refreshBackendStatus() {
+          if (backendHealthEl) {
+            backendHealthEl.textContent = "Checking health…";
+          }
+          if (backendOriginsEl) {
+            backendOriginsEl.textContent = "Fetching origins…";
+          }
+          try {
+            const health = await fetchJson("/api/health");
+            if (backendHealthEl) {
+              backendHealthEl.textContent = health
+                ? `Model: ${health.model} (mock: ${health.mock ? "on" : "off"})`
+                : "Health endpoint unavailable";
+            }
+          } catch (error) {
+            if (backendHealthEl) {
+              backendHealthEl.textContent = `Health check failed: ${error.message}`;
+            }
+          }
+
+          try {
+            const origins = await fetchJson("/api/dev/allowed-extension-origins");
+            if (backendOriginsEl) {
+              if (!origins) {
+                backendOriginsEl.textContent = "Dev origin diagnostics disabled (ENABLE_DEV_EXTENSION_REGISTRATION=false)";
+              } else {
+                const allowed = origins.allowed ?? [];
+                const dynamic = origins.dynamic ?? [];
+                backendOriginsEl.textContent = `Static: ${allowed.length || 0}, Dynamic: ${dynamic.length || 0}`;
+              }
+            }
+          } catch (error) {
+            if (backendOriginsEl) {
+              backendOriginsEl.textContent = `Origin lookup failed: ${error.message}`;
+            }
+          }
+        }
+
+        async function simulateBackendRestart() {
+          try {
+            await fetchJson("/api/dev/clear-extension-origins", { method: "POST" });
+            setBackendNote("Cleared dev origin registry. Trigger the extension to re-register.");
+            await refreshBackendStatus();
+          } catch (error) {
+            setBackendNote(`Failed to clear registry: ${error.message}`, true);
+          }
+        }
+
+        function forceDevReRegister() {
+          if (!nativeRuntime) {
+            setBackendNote("Native runtime unavailable in harness context", true);
+            return;
+          }
+          nativeRuntime.sendMessage(
+            {
+              schemaVersion: 1,
+              type: "DEV_FORCE_REGISTER",
+              payload: undefined
+            },
+            () => {
+              const err = nativeRuntime.lastError;
+              if (err) {
+                setBackendNote(`Re-register failed: ${err.message}`, true);
+              } else {
+                setBackendNote("Background worker asked to re-register origin.");
+              }
+            }
+          );
         }
 
         function emitMessage(message) {
@@ -281,6 +458,11 @@
           }
           setTimeout(() => {
             const message = shouldFail ? buildError(request) : buildResponse(request);
+            appendRequestLog({
+              id: request.id,
+              status: message.type === "ANALYZE_RESULT" ? "success" : "error",
+              retryable: message.type === "ANALYZE_ERROR" ? message.payload.retryable : false
+            });
             emitMessage(message);
           }, delay);
         }
@@ -334,6 +516,18 @@
           storageState.clear();
           console.info("[harness] session storage cleared");
         });
+
+        document.getElementById("refresh-backend")?.addEventListener("click", () => {
+          void refreshBackendStatus();
+        });
+        document.getElementById("simulate-restart")?.addEventListener("click", () => {
+          void simulateBackendRestart();
+        });
+        document.getElementById("force-register")?.addEventListener("click", () => {
+          forceDevReRegister();
+        });
+
+        void refreshBackendStatus();
       })();
     </script>
 

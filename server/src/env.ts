@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import dotenv from "dotenv";
 import { z } from "zod";
 
@@ -44,17 +46,52 @@ const EnvSchema = z.object({
       }
       const normalized = value.trim().toLowerCase();
       return normalized === "1" || normalized === "true";
-    })
+    }),
+  DEV_EXTENSION_REGISTRY_FILE: z
+    .string()
+    .optional()
+    .default(".cache/dev-extension-origins.json")
 });
 
 const parsed = EnvSchema.parse(process.env);
 
+const repoRoot = path.resolve(__dirname, "..", "..");
+
+function normalizeExtensionId(value: string): string | null {
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) {
+    return null;
+  }
+  if (/^[a-p]{32}$/.test(trimmed)) {
+    return `chrome-extension://${trimmed}`;
+  }
+  if (trimmed.startsWith("chrome-extension://")) {
+    return trimmed;
+  }
+  return null;
+}
+
+const allowedExtensionOrigins = new Set(
+  parsed.ALLOWED_EXTENSION_IDS.map(normalizeExtensionId).filter((value): value is string => Boolean(value))
+);
+
+function resolveRegistryFile(rawPath: string | undefined): string | undefined {
+  if (!rawPath) {
+    return undefined;
+  }
+  const normalized = rawPath.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  return path.isAbsolute(normalized)
+    ? normalized
+    : path.resolve(repoRoot, normalized);
+}
+
 export const env = {
   ...parsed,
-  allowedOrigins:
-    parsed.ALLOWED_EXTENSION_IDS.length === 0
-      ? null
-      : new Set(parsed.ALLOWED_EXTENSION_IDS.map((id) => `chrome-extension://${id.toLowerCase()}`)),
+  allowedOrigins: allowedExtensionOrigins,
   enableDevExtensionRegistration: parsed.ENABLE_DEV_EXTENSION_REGISTRATION,
-  enableBatchAnalyze: parsed.ENABLE_BATCH_ANALYZE
+  enableBatchAnalyze: parsed.ENABLE_BATCH_ANALYZE,
+  devExtensionRegistryFile: resolveRegistryFile(parsed.DEV_EXTENSION_REGISTRY_FILE)
 };

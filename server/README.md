@@ -20,6 +20,7 @@ cp .env.example .env
 | `OLLAMA_TIMEOUT_MS` | Request timeout before aborting | `20000` |
 | `ALLOWED_EXTENSION_IDS` | Comma-separated Chrome IDs allowed via CORS | *(empty → dynamic registration)* |
 | `ENABLE_DEV_EXTENSION_REGISTRATION` | Allow unpacked extensions to register themselves | `true` |
+| `DEV_EXTENSION_REGISTRY_FILE` | Where to persist dynamically registered origins | `.cache/dev-extension-origins.json` |
 | `MOCK_OLLAMA` | Force canned responses for every request | `false` |
 | `MOCK_OLLAMA_FALLBACK` | Retry real model once, then fall back to mock payload | `false` |
 | `ENABLE_BATCH_ANALYZE` | Expose `POST /api/analyze/batch` for grouped requests | `false` |
@@ -27,6 +28,12 @@ cp .env.example .env
 During local development you can keep `ALLOWED_EXTENSION_IDS` empty and rely on
 `ENABLE_DEV_EXTENSION_REGISTRATION=true`, which lets the unpacked MV3 build post its
 origin to `/api/dev/register-extension-origin`.
+
+To inspect or reset the registry manually:
+
+- `node scripts/inspect-dev-origins.mjs` — print the static + dynamic allowlists.
+- `curl -X POST http://127.0.0.1:5000/api/dev/clear-extension-origins` — simulate a backend restart.
+- `npm run smoke:dev` — sanity check that `/api/analyze` accepts requests and report diagnostics.
 
 ### Model Setup
 
@@ -50,6 +57,8 @@ before loading the extension.
 - `npm run build` – compile TypeScript to `dist/`.
 - `npm start` – run the compiled server.
 - `npm run typecheck` – run TypeScript in no-emit mode.
+- `npm run test` – execute Vitest suites (registry + dev routes).
+- `npm run smoke:dev` – ping `/api/dev/allowed-extension-origins` (if enabled) and run a real `/api/analyze` request.
 
 ## API
 
@@ -59,11 +68,9 @@ before loading the extension.
 - `GET /health` – returns `{ status, model, mock }` for monitoring.
 - `POST /api/analyze` – accepts the summarized payload used by the extension.
 - `POST /api/analyze/batch` – (optional, gated by `ENABLE_BATCH_ANALYZE`) processes up to four items per request for faster local analysis.
-- `POST /api/dev/register-extension-origin?id=<extensionId>` – (dev only) allows
-  an unpacked extension to register its Chrome origin dynamically so CORS checks
-  pass. The background service worker calls this endpoint automatically using a
-  `no-cors` request; no manual action is required unless you disable
-  `ENABLE_DEV_EXTENSION_REGISTRATION`.
+- `POST /api/dev/register-extension-origin?id=<extensionId>` – (dev only) allows an unpacked extension to register its Chrome origin dynamically so CORS checks pass. Call this after loading the unpacked build.
+- `POST /api/dev/clear-extension-origins` – wipes the in-memory + persisted dev registry, simulating a backend restart.
+- `GET /api/dev/allowed-extension-origins` – returns both static (`ALLOWED_EXTENSION_IDS`) and dynamically registered origins for diagnostics.
 
 Example:
 

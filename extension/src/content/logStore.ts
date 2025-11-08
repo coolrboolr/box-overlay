@@ -1,6 +1,14 @@
 import { isDev } from "../shared/isDev";
 
-export type TelemetryEventType = "scan" | "request" | "overlay-success" | "retry" | "error";
+export type TelemetryEventType =
+  | "scan"
+  | "request"
+  | "overlay-success"
+  | "retry"
+  | "error"
+  | "forbidden-recovery"
+  | "forbidden-error"
+  | "batch-fallback";
 
 export interface TelemetryEntry {
   type: TelemetryEventType;
@@ -14,6 +22,9 @@ export interface TelemetryStats {
   overlaysResolved: number;
   retries: number;
   errors: number;
+  forbiddenRecoveries: number;
+  forbiddenErrors: number;
+  batchFallbacks: number;
 }
 
 const DEFAULT_STATS: TelemetryStats = {
@@ -21,7 +32,10 @@ const DEFAULT_STATS: TelemetryStats = {
   requestsQueued: 0,
   overlaysResolved: 0,
   retries: 0,
-  errors: 0
+  errors: 0,
+  forbiddenRecoveries: 0,
+  forbiddenErrors: 0,
+  batchFallbacks: 0
 };
 
 const STORAGE_KEY = "overlayTelemetryLogs";
@@ -45,7 +59,10 @@ const eventToStat: Record<TelemetryEventType, StatKey | null> = {
   request: "requestsQueued",
   "overlay-success": "overlaysResolved",
   retry: "retries",
-  error: "errors"
+  error: "errors",
+  "forbidden-recovery": "forbiddenRecoveries",
+  "forbidden-error": "forbiddenErrors",
+  "batch-fallback": "batchFallbacks"
 };
 
 function scheduleNotify(): void {

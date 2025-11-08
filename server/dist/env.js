@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.env = void 0;
+const node_path_1 = __importDefault(require("node:path"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const zod_1 = require("zod");
 dotenv_1.default.config();
@@ -46,15 +47,45 @@ const EnvSchema = zod_1.z.object({
         }
         const normalized = value.trim().toLowerCase();
         return normalized === "1" || normalized === "true";
-    })
+    }),
+    DEV_EXTENSION_REGISTRY_FILE: zod_1.z
+        .string()
+        .optional()
+        .default(".cache/dev-extension-origins.json")
 });
 const parsed = EnvSchema.parse(process.env);
+const repoRoot = node_path_1.default.resolve(__dirname, "..", "..");
+function normalizeExtensionId(value) {
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed) {
+        return null;
+    }
+    if (/^[a-p]{32}$/.test(trimmed)) {
+        return `chrome-extension://${trimmed}`;
+    }
+    if (trimmed.startsWith("chrome-extension://")) {
+        return trimmed;
+    }
+    return null;
+}
+const allowedExtensionOrigins = new Set(parsed.ALLOWED_EXTENSION_IDS.map(normalizeExtensionId).filter((value) => Boolean(value)));
+function resolveRegistryFile(rawPath) {
+    if (!rawPath) {
+        return undefined;
+    }
+    const normalized = rawPath.trim();
+    if (!normalized) {
+        return undefined;
+    }
+    return node_path_1.default.isAbsolute(normalized)
+        ? normalized
+        : node_path_1.default.resolve(repoRoot, normalized);
+}
 exports.env = {
     ...parsed,
-    allowedOrigins: parsed.ALLOWED_EXTENSION_IDS.length === 0
-        ? null
-        : new Set(parsed.ALLOWED_EXTENSION_IDS.map((id) => `chrome-extension://${id.toLowerCase()}`)),
+    allowedOrigins: allowedExtensionOrigins,
     enableDevExtensionRegistration: parsed.ENABLE_DEV_EXTENSION_REGISTRATION,
-    enableBatchAnalyze: parsed.ENABLE_BATCH_ANALYZE
+    enableBatchAnalyze: parsed.ENABLE_BATCH_ANALYZE,
+    devExtensionRegistryFile: resolveRegistryFile(parsed.DEV_EXTENSION_REGISTRY_FILE)
 };
 //# sourceMappingURL=env.js.map
