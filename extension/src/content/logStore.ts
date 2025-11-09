@@ -8,7 +8,9 @@ export type TelemetryEventType =
   | "error"
   | "forbidden-recovery"
   | "forbidden-error"
-  | "batch-fallback";
+  | "batch-fallback"
+  | "memory-index"
+  | "memory-index-result";
 
 export interface TelemetryEntry {
   type: TelemetryEventType;
@@ -78,7 +80,9 @@ const eventToStat: Record<TelemetryEventType, StatKey | null> = {
   error: "errors",
   "forbidden-recovery": "forbiddenRecoveries",
   "forbidden-error": "forbiddenErrors",
-  "batch-fallback": "batchFallbacks"
+  "batch-fallback": "batchFallbacks",
+  "memory-index": null,
+  "memory-index-result": null
 };
 
 function scheduleNotify(): void {

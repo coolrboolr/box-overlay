@@ -24,6 +24,12 @@
         "default": "Alt+L"
       },
       "description": "Toggle analysis overlays"
+    },
+    "save-to-memory": {
+      "suggested_key": {
+        "default": "Alt+Shift+M"
+      },
+      "description": "Save current page content to memory"
     }
   },
   "content_scripts": [

@@ -8,8 +8,10 @@ const cors_1 = __importDefault(require("cors"));
 const express_1 = __importDefault(require("express"));
 const analyzeService_1 = require("./analyzeService");
 const env_1 = require("./env");
+const store_1 = require("./memory/store");
 const analyzeBatch_1 = require("./routes/analyzeBatch");
 const devExtensions_1 = require("./routes/devExtensions");
+const memory_1 = require("./routes/memory");
 const schema_1 = require("./schema");
 const errors_1 = require("./utils/errors");
 const devExtensionRegistry_1 = require("./utils/devExtensionRegistry");
@@ -19,9 +21,27 @@ async function createServerApp(options = {}) {
     const app = (0, express_1.default)();
     const registry = new devExtensionRegistry_1.DevExtensionRegistry({ filePath: config.devExtensionRegistryFile });
     const dynamicExtensionOrigins = new Set();
+    let memoryStore = config.memoryStore;
     if (config.enableDevExtensionRegistration) {
         await registry.load();
         registry.getAll().forEach((origin) => dynamicExtensionOrigins.add(origin));
+    }
+    if (config.enableMemory) {
+        if (!memoryStore) {
+            memoryStore = new store_1.MemoryStore({
+                dbPath: env_1.env.memoryDbPath,
+                dedupThreshold: env_1.env.memoryDedupThreshold,
+                maxCharsPerChunk: env_1.env.memoryMaxCharsPerChunk
+            });
+            await memoryStore.load();
+            console.log("[memory] store loaded", {
+                path: env_1.env.memoryDbPath,
+                dedupThreshold: env_1.env.memoryDedupThreshold
+            });
+        }
+        else {
+            await memoryStore.load();
+        }
     }
     app.use(express_1.default.json({ limit: JSON_LIMIT }));
     app.use(buildCorsMiddleware());
@@ -45,6 +65,10 @@ async function createServerApp(options = {}) {
     if (config.enableBatchAnalyze) {
         app.use((0, analyzeBatch_1.createAnalyzeBatchRouter)());
     }
+    app.use("/api/memory", (0, memory_1.createMemoryRouter)({
+        enabled: config.enableMemory,
+        store: memoryStore
+    }));
     const healthHandler = (_req, res) => {
         res.json({ status: "ok", model: env_1.env.OLLAMA_MODEL, mock: env_1.env.MOCK_OLLAMA });
     };
@@ -104,7 +128,9 @@ function resolveConfig(options) {
         enableDevExtensionRegistration: options.enableDevExtensionRegistration ?? env_1.env.enableDevExtensionRegistration,
         enableBatchAnalyze: options.enableBatchAnalyze ?? env_1.env.enableBatchAnalyze,
         allowedOrigins: options.allowedOrigins ?? new Set(env_1.env.allowedOrigins),
-        devExtensionRegistryFile: options.devExtensionRegistryFile ?? env_1.env.devExtensionRegistryFile
+        devExtensionRegistryFile: options.devExtensionRegistryFile ?? env_1.env.devExtensionRegistryFile,
+        enableMemory: options.enableMemory ?? Boolean(env_1.env.memoryEnabled),
+        memoryStore: options.memoryStore
     };
 }
 function buildCorsMiddleware() {

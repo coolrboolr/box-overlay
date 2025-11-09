@@ -68,6 +68,30 @@ These tools are dev-only (`isDev` builds). They never run in production bundles.
 - Build the extension with `ENABLE_BATCH=true` in the environment (e.g., `ENABLE_BATCH=true npm run watch`) so the background worker fans out through the batch endpoint. It auto-detects 404s and falls back to single-item mode if the backend is older.
 - Error payloads now include `statusCode` and optional `details`, so overlays display messages like “Backend responded with HTTP 400 (HTTP 400)” to simplify triage.
 
+## Persistent Memory Smoke Test
+
+1. Enable the feature flags in `server/.env`:
+   ```bash
+   MEMORY_ENABLED=true
+   MEMORY_DB_PATH=.cache/memory-store.json
+   MEMORY_EMBED_MODEL=mxbai-embed-large
+   ```
+   When running tests or CI without Ollama embeddings available, set `USE_FAKE_EMBEDDINGS=true` so the server skips real model calls.
+2. Restart `npm run dev` and watch the logs for `[memory] store loaded …`.
+3. Index sample content via curl:
+   ```bash
+   curl -X POST http://127.0.0.1:5000/api/memory/index \
+     -H "Content-Type: application/json" \
+     -d '{"items":[{"id":"mem-1","text":"Persistent memory smoke text","url":"https://example.com","title":"Example","capturedAt":"'$(date -Iseconds)'"}]}'
+   ```
+   A healthy response returns counts for `indexed`, `duplicate`, and `failed` along with stored chunk IDs.
+4. Inspect stats:
+   ```bash
+   curl http://127.0.0.1:5000/api/memory/stats | jq
+   ```
+   Confirm the `items`, `vectors`, and `lastPersistedAt` fields reflect the ingested content.
+5. Delete the `.cache/memory-store.json` file if you need a clean slate between manual tests; the server will recreate it on next boot.
+
 ## Local Harness
 
 1. Run `cd extension && npm run watch` so `dist/content.js` stays synced.
@@ -82,7 +106,22 @@ These tools are dev-only (`isDev` builds). They never run in production bundles.
    - Confirm pending overlays show “Analyzing…” with spinner right after a card spawns.
    - Toggle the failure checkbox and use the inline “Retry” button to ensure errors resubmit successfully.
    - Re-render cards and verify overlays reattach without duplicate Analyze requests.
-   - Toggle dock mode to make sure the stack respects ordering and persists via session storage.
+- Toggle dock mode to make sure the stack respects ordering and persists via session storage.
+
+## Enabling Memory Capture
+
+1. Enable the server feature flags (`MEMORY_ENABLED=true`, `USE_FAKE_EMBEDDINGS=true` if you
+   don't want to run the embedding model) and restart `npm run dev` in `server/`.
+2. In Chrome DevTools (any tab), run:
+   ```js
+   chrome.storage.sync.set({ memoryCaptureEnabled: true })
+   ```
+   This persists the flag so the content script can queue memory items.
+3. Reload the extension/harness and browse a few mock cards. After ~3 seconds the background
+   worker batches `/api/memory/index` requests; use **Alt+Shift+M** (or the harness “Save to
+   memory” button) to flush immediately.
+4. Inspect the background console for `[memory]` logs and check `curl /api/memory/stats` to
+   confirm new items were stored.
 
 ## Chrome Extension Workflow
 

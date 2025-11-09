@@ -231,6 +231,15 @@
       </p>
     </section>
 
+    <section class="controls">
+      <h2>Memory Capture</h2>
+      <div>
+        <button id="enable-memory">Enable flag (writes chrome.storage.sync)</button>
+        <button id="save-memory" class="secondary">Save to memory (Alt+Shift+M)</button>
+      </div>
+      <p class="hint">Requires backend `MEMORY_ENABLED=true`. Use the button to force a flush while testing.</p>
+    </section>
+
     <section class="backend-panel">
       <h2>Backend Status</h2>
       <p id="backend-health" class="status-line">Checking…</p>
@@ -276,8 +285,10 @@
     <script>
       (() => {
         const API_BASE_URL = "http://127.0.0.1:5000";
+        const SCHEMA_VERSION = 1;
         const nativeRuntime = window.chrome?.runtime ?? null;
         const storageState = new Map();
+        const syncStorageState = new Map();
         const messageListeners = new Set();
         const requestLog = [];
 
@@ -450,6 +461,29 @@
           };
         }
 
+        function handleMemoryIndexRequest(request) {
+          const delay = Number(document.querySelector("#response-delay").value) || 0;
+          setTimeout(() => {
+            const response = {
+              schemaVersion: request.schemaVersion,
+              counts: {
+                indexed: request.items?.length ?? 0,
+                duplicate: 0,
+                failed: 0
+              },
+              results: (request.items ?? []).map((item) => ({
+                id: item.id,
+                status: "indexed"
+              }))
+            };
+            emitMessage({
+              schemaVersion: SCHEMA_VERSION,
+              type: "MEMORY_INDEX_RESULT",
+              payload: response
+            });
+          }, delay);
+        }
+
         function handleAnalyzeRequest(request) {
           const delay = Number(document.querySelector("#response-delay").value) || 0;
           const shouldFail = document.querySelector("#next-error").checked;
@@ -474,6 +508,9 @@
             if (message?.type === "ANALYZE_REQUEST" && message.payload) {
               handleAnalyzeRequest(message.payload);
             }
+            if (message?.type === "MEMORY_INDEX_REQUEST" && message.payload) {
+              handleMemoryIndexRequest(message.payload);
+            }
             responseCallback?.();
           },
           onMessage: {
@@ -486,29 +523,35 @@
           }
         };
 
-        const sessionStorageShim = {
-          get(keys, callback) {
-            const normalized = normalizeKeys(keys);
-            const result = {};
-            normalized.forEach((key) => {
-              if (storageState.has(key)) {
-                result[key] = storageState.get(key);
-              }
-            });
-            callback(result);
-          },
-          set(items, callback) {
-            Object.entries(items ?? {}).forEach(([key, value]) => {
-              storageState.set(key, value);
-            });
-            callback?.();
-          }
-        };
+        function createStorageShim(store) {
+          return {
+            get(keys, callback) {
+              const normalized = normalizeKeys(keys);
+              const result = {};
+              normalized.forEach((key) => {
+                if (store.has(key)) {
+                  result[key] = store.get(key);
+                }
+              });
+              callback(result);
+            },
+            set(items, callback) {
+              Object.entries(items ?? {}).forEach(([key, value]) => {
+                store.set(key, value);
+              });
+              callback?.();
+            }
+          };
+        }
+
+        const sessionStorageShim = createStorageShim(storageState);
+        const syncStorageShim = createStorageShim(syncStorageState);
 
         window.chrome = {
           runtime,
           storage: {
-            session: sessionStorageShim
+            session: sessionStorageShim,
+            sync: syncStorageShim
           }
         };
 
@@ -525,6 +568,20 @@
         });
         document.getElementById("force-register")?.addEventListener("click", () => {
           forceDevReRegister();
+        });
+
+        document.getElementById("enable-memory")?.addEventListener("click", () => {
+          window.chrome.storage.sync.set({ memoryCaptureEnabled: true }, () => {
+            setBackendNote("memoryCaptureEnabled flag stored in chrome.storage.sync");
+          });
+        });
+
+        document.getElementById("save-memory")?.addEventListener("click", () => {
+          emitMessage({
+            schemaVersion: SCHEMA_VERSION,
+            type: "MEMORY_CAPTURE_NOW",
+            payload: { force: true }
+          });
         });
 
         void refreshBackendStatus();

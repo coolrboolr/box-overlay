@@ -25,16 +25,19 @@ import {
   type ItemAnalysisResponse,
   type AnalyzeError,
   type RuntimeMessage,
-  type DevTelemetryEventPayload
+  type DevTelemetryEventPayload,
+  type MemoryIndexResponse
 } from "../types/messages";
 import { isDev } from "../shared/isDev";
 import { exportLogs, initTelemetryStore, recordEvent } from "./logStore";
 import { mountDebugHud, unmountDebugHud } from "./debugHud";
+import { createMemoryCaptureController } from "./memoryCapture";
 
 const activeProfile = getActiveProfile();
 const candidateSelector = activeProfile.selectors.join(",");
 
 const PENDING_SUMMARY = "Analyzing…";
+const memoryCapture = createMemoryCaptureController();
 
 let overlaysEnabled = true;
 let dockEnabled = false;
@@ -120,7 +123,9 @@ function isRuntimeMessage(message: unknown): message is RuntimeMessage {
     candidate.type === "ANALYZE_ERROR" ||
     candidate.type === "ANALYZE_BATCH_RESULT" ||
     candidate.type === "TOGGLE_OVERLAYS" ||
-    candidate.type === "DEV_TELEMETRY_EVENT"
+    candidate.type === "DEV_TELEMETRY_EVENT" ||
+    candidate.type === "MEMORY_INDEX_RESULT" ||
+    candidate.type === "MEMORY_CAPTURE_NOW"
   );
 }
 
@@ -456,6 +461,7 @@ initializeScanner((batch) => {
     debug("extracted batch", batch);
   }
   batch.forEach(sendAnalyzeRequest);
+  memoryCapture.notifyScan(batch.length);
 });
 
 window.addEventListener("keydown", (event) => {
@@ -478,6 +484,17 @@ window.addEventListener("keydown", (event) => {
     }
     event.preventDefault();
     void exportLogs();
+    return;
+  }
+
+  const isMemoryShortcut =
+    event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey && event.code === "KeyM";
+  if (isMemoryShortcut) {
+    if (shouldIgnoreKeyEvent(event)) {
+      return;
+    }
+    event.preventDefault();
+    memoryCapture.handleCaptureCommand({ force: true });
     return;
   }
 
@@ -519,6 +536,12 @@ chrome.runtime.onMessage.addListener((message) => {
       break;
     case "DEV_TELEMETRY_EVENT":
       handleDevTelemetryEvent(message.payload);
+      break;
+    case "MEMORY_INDEX_RESULT":
+      memoryCapture.handleResult(message.payload as MemoryIndexResponse);
+      break;
+    case "MEMORY_CAPTURE_NOW":
+      memoryCapture.handleCaptureCommand(message.payload ?? { force: true });
       break;
     default:
       break;

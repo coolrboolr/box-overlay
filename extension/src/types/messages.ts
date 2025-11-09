@@ -1,4 +1,5 @@
 export const SCHEMA_VERSION = 1 as const;
+export const MEMORY_SCHEMA_VERSION = 1 as const;
 
 export interface ItemSourceMeta {
   profileName?: string;
@@ -50,6 +51,42 @@ export interface BatchAnalysisResponse {
   results: BatchAnalysisResult[];
 }
 
+export interface MemoryIndexItem {
+  id: string;
+  sourceId?: string;
+  text: string;
+  url?: string;
+  title?: string;
+  contentType?: string;
+  capturedAt?: string;
+  language?: string;
+  imageTag?: string;
+  imageData?: string;
+}
+
+export interface MemoryIndexRequest {
+  schemaVersion: typeof MEMORY_SCHEMA_VERSION;
+  items: MemoryIndexItem[];
+  flush?: boolean;
+}
+
+export interface MemoryIndexResult {
+  id: string;
+  status: "indexed" | "duplicate" | "failed";
+  message?: string;
+  storedIds?: string[];
+}
+
+export interface MemoryIndexResponse {
+  schemaVersion: typeof MEMORY_SCHEMA_VERSION;
+  counts: {
+    indexed: number;
+    duplicate: number;
+    failed: number;
+  };
+  results: MemoryIndexResult[];
+}
+
 interface RuntimeMessageBase<Type extends string, Payload = undefined> {
   type: Type;
   schemaVersion: typeof SCHEMA_VERSION;
@@ -63,4 +100,7 @@ export type RuntimeMessage =
   | RuntimeMessageBase<"ANALYZE_BATCH_RESULT", BatchAnalysisResponse>
   | RuntimeMessageBase<"TOGGLE_OVERLAYS", undefined>
   | RuntimeMessageBase<"DEV_TELEMETRY_EVENT", DevTelemetryEventPayload>
-  | RuntimeMessageBase<"DEV_FORCE_REGISTER", undefined>;
+  | RuntimeMessageBase<"DEV_FORCE_REGISTER", undefined>
+  | RuntimeMessageBase<"MEMORY_INDEX_REQUEST", MemoryIndexRequest>
+  | RuntimeMessageBase<"MEMORY_INDEX_RESULT", MemoryIndexResponse>
+  | RuntimeMessageBase<"MEMORY_CAPTURE_NOW", { force?: boolean }>;

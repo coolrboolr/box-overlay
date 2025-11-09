@@ -50,7 +50,28 @@ const EnvSchema = z.object({
   DEV_EXTENSION_REGISTRY_FILE: z
     .string()
     .optional()
-    .default(".cache/dev-extension-origins.json")
+    .default(".cache/dev-extension-origins.json"),
+  MEMORY_ENABLED: z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (value === undefined) {
+        return false;
+      }
+      const normalized = value.trim().toLowerCase();
+      return normalized === "1" || normalized === "true";
+    }),
+  MEMORY_DB_PATH: z
+    .string()
+    .optional()
+    .default(".cache/memory-store.json"),
+  MEMORY_EMBED_MODEL: z.string().default("mxbai-embed-large"),
+  MEMORY_DEDUP_THRESHOLD: z.coerce.number().min(0).max(1).default(0.9),
+  MEMORY_MAX_CHARS_PER_CHUNK: z.coerce.number().int().positive().default(1000),
+  USE_FAKE_EMBEDDINGS: z
+    .string()
+    .optional()
+    .transform((value) => value === "true")
 });
 
 const parsed = EnvSchema.parse(process.env);
@@ -75,7 +96,7 @@ const allowedExtensionOrigins = new Set(
   parsed.ALLOWED_EXTENSION_IDS.map(normalizeExtensionId).filter((value): value is string => Boolean(value))
 );
 
-function resolveRegistryFile(rawPath: string | undefined): string | undefined {
+function resolvePathFromRepo(rawPath: string | undefined): string | undefined {
   if (!rawPath) {
     return undefined;
   }
@@ -93,5 +114,11 @@ export const env = {
   allowedOrigins: allowedExtensionOrigins,
   enableDevExtensionRegistration: parsed.ENABLE_DEV_EXTENSION_REGISTRATION,
   enableBatchAnalyze: parsed.ENABLE_BATCH_ANALYZE,
-  devExtensionRegistryFile: resolveRegistryFile(parsed.DEV_EXTENSION_REGISTRY_FILE)
+  devExtensionRegistryFile: resolvePathFromRepo(parsed.DEV_EXTENSION_REGISTRY_FILE),
+  memoryEnabled: parsed.MEMORY_ENABLED,
+  memoryDbPath: resolvePathFromRepo(parsed.MEMORY_DB_PATH) ?? path.resolve(repoRoot, ".cache/memory-store.json"),
+  memoryEmbedModel: parsed.MEMORY_EMBED_MODEL,
+  memoryDedupThreshold: parsed.MEMORY_DEDUP_THRESHOLD,
+  memoryMaxCharsPerChunk: parsed.MEMORY_MAX_CHARS_PER_CHUNK,
+  useFakeEmbeddings: parsed.USE_FAKE_EMBEDDINGS
 };

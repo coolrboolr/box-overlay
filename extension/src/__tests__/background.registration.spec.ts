@@ -32,7 +32,10 @@ function createChromeBackgroundMock() {
       sendMessage: tabsSendMessage,
       query: vi.fn((_queryInfo: chrome.tabs.QueryInfo, callback: (tabs: chrome.tabs.Tab[]) => void) => {
         callback([]);
-      })
+      }),
+      onRemoved: {
+        addListener: vi.fn()
+      }
     },
     commands: {
       onCommand: {

@@ -28,6 +28,9 @@ export default defineConfig((options) => {
     define: {
       "process.env.NODE_ENV": JSON.stringify(nodeEnv),
       "process.env.ENABLE_BATCH": JSON.stringify(process.env.ENABLE_BATCH ?? ""),
+      "process.env.MEMORY_CAPTURE_DEFAULT": JSON.stringify(
+        process.env.MEMORY_CAPTURE_DEFAULT ?? ""
+      ),
       __LLM_OVERLAY_DEV__: JSON.stringify(isDevBuild)
     },
     esbuildOptions(buildOptions) {

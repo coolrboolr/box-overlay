@@ -30,3 +30,8 @@ npm install
   focus is inside text inputs, selects, or editable regions.
 - Option/Alt+Shift+D toggles dock mode, pinning overlays to the bottom-right
   stack for quick triage (state persists per session).
+- Experimental memory capture: run `chrome.storage.sync.set({ memoryCaptureEnabled: true })`
+  from DevTools (or use the harness toggle) and make sure the backend sets
+  `MEMORY_ENABLED=true`. With the feature on, the extension queues page content
+  for `/api/memory/index`; use **Alt+Shift+M** (or the harness button) to flush
+  immediately when you want to save the current page.

@@ -4,8 +4,10 @@ import type { ErrorRequestHandler } from "express";
 
 import { analyzeRequest } from "./analyzeService";
 import { env } from "./env";
+import { MemoryStore } from "./memory/store";
 import { createAnalyzeBatchRouter } from "./routes/analyzeBatch";
 import { createDevExtensionsRouter } from "./routes/devExtensions";
+import { createMemoryRouter } from "./routes/memory";
 import {
   ErrorResponseSchema,
   ItemAnalysisRequestSchema
@@ -20,6 +22,8 @@ export interface CreateServerAppOptions {
   enableBatchAnalyze?: boolean;
   allowedOrigins?: Set<string>;
   devExtensionRegistryFile?: string;
+  enableMemory?: boolean;
+  memoryStore?: MemoryStore;
 }
 
 interface ResolvedServerConfig {
@@ -27,6 +31,8 @@ interface ResolvedServerConfig {
   enableBatchAnalyze: boolean;
   allowedOrigins: Set<string>;
   devExtensionRegistryFile?: string;
+  enableMemory: boolean;
+  memoryStore?: MemoryStore;
 }
 
 export async function createServerApp(options: CreateServerAppOptions = {}) {
@@ -35,10 +41,28 @@ export async function createServerApp(options: CreateServerAppOptions = {}) {
   const app = express();
   const registry = new DevExtensionRegistry({ filePath: config.devExtensionRegistryFile });
   const dynamicExtensionOrigins = new Set<string>();
+  let memoryStore: MemoryStore | undefined = config.memoryStore;
 
   if (config.enableDevExtensionRegistration) {
     await registry.load();
     registry.getAll().forEach((origin) => dynamicExtensionOrigins.add(origin));
+  }
+
+  if (config.enableMemory) {
+    if (!memoryStore) {
+      memoryStore = new MemoryStore({
+        dbPath: env.memoryDbPath,
+        dedupThreshold: env.memoryDedupThreshold,
+        maxCharsPerChunk: env.memoryMaxCharsPerChunk
+      });
+      await memoryStore.load();
+      console.log("[memory] store loaded", {
+        path: env.memoryDbPath,
+        dedupThreshold: env.memoryDedupThreshold
+      });
+    } else {
+      await memoryStore.load();
+    }
   }
 
   app.use(express.json({ limit: JSON_LIMIT }));
@@ -72,6 +96,14 @@ export async function createServerApp(options: CreateServerAppOptions = {}) {
   if (config.enableBatchAnalyze) {
     app.use(createAnalyzeBatchRouter());
   }
+
+  app.use(
+    "/api/memory",
+    createMemoryRouter({
+      enabled: config.enableMemory,
+      store: memoryStore
+    })
+  );
 
   const healthHandler = (_req: express.Request, res: express.Response) => {
     res.json({ status: "ok", model: env.OLLAMA_MODEL, mock: env.MOCK_OLLAMA });
@@ -143,7 +175,9 @@ function resolveConfig(options: CreateServerAppOptions): ResolvedServerConfig {
     enableBatchAnalyze: options.enableBatchAnalyze ?? env.enableBatchAnalyze,
     allowedOrigins: options.allowedOrigins ?? new Set(env.allowedOrigins),
     devExtensionRegistryFile:
-      options.devExtensionRegistryFile ?? env.devExtensionRegistryFile
+      options.devExtensionRegistryFile ?? env.devExtensionRegistryFile,
+    enableMemory: options.enableMemory ?? Boolean(env.memoryEnabled),
+    memoryStore: options.memoryStore
   };
 }
 

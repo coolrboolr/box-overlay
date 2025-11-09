@@ -11,7 +11,7 @@ const MEDIA_QUERY = "img,video";
 const activeProfile = getActiveProfile();
 const candidateSelector = activeProfile.selectors.join(",");
 
-function matchesRelaxedPatterns(element: Element, pattern: RegExp): boolean {
+export function matchesRelaxedPatterns(element: Element, pattern: RegExp): boolean {
   const attributesToCheck = [
     element.getAttribute("data-testid"),
     element.getAttribute("data-component"),
@@ -26,15 +26,15 @@ function matchesRelaxedPatterns(element: Element, pattern: RegExp): boolean {
   );
 }
 
-function hasEnoughStructure(element: Element): boolean {
+export function hasEnoughStructure(element: Element): boolean {
   return element.querySelectorAll(STRUCTURE_QUERY).length >= 3;
 }
 
-function hasMedia(element: Element): boolean {
+export function hasMedia(element: Element): boolean {
   return Boolean(element.querySelector(MEDIA_QUERY));
 }
 
-function computeMinTextLength(
+export function computeMinTextLength(
   hasStructuredContent: boolean,
   hasMediaContent: boolean,
   base: number
@@ -48,7 +48,7 @@ function computeMinTextLength(
   return base;
 }
 
-function isNumericOrSymbolHeavy(text: string): boolean {
+export function isNumericOrSymbolHeavy(text: string): boolean {
   const condensed = text.replace(/\s+/g, "");
   if (!condensed) {
     return true;
@@ -128,13 +128,13 @@ export async function extractItems(root: Document | Element): Promise<ItemAnalys
   );
 }
 
-export function cleanText(node: Element): string {
+export function cleanText(node: Element, maxLength = MAX_TEXT_LENGTH): string {
   const raw = node.textContent ?? "";
   const normalized = raw.replace(/\s+/g, " ").trim();
-  if (normalized.length <= MAX_TEXT_LENGTH) {
+  if (normalized.length <= maxLength) {
     return normalized;
   }
-  return normalized.slice(0, MAX_TEXT_LENGTH);
+  return normalized.slice(0, maxLength);
 }
 
 export async function collectImageData(node: Element): Promise<string | undefined> {

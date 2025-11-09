@@ -31,7 +31,10 @@ function createChromeBackgroundMock() {
       sendMessage: tabsSendMessage,
       query: vi.fn((_queryInfo: chrome.tabs.QueryInfo, callback: (tabs: chrome.tabs.Tab[]) => void) => {
         callback([]);
-      })
+      }),
+      onRemoved: {
+        addListener: vi.fn()
+      }
     },
     commands: {
       onCommand: {
@@ -107,5 +110,93 @@ describe("background pipeline", () => {
 
     const analyzeUrl = fetchMock.mock.calls[1]?.[0];
     expect(analyzeUrl).toContain("/api/analyze");
+  });
+
+  it("queues memory requests and posts to the memory endpoint", async () => {
+    vi.useFakeTimers();
+
+    const memoryResponse = {
+      schemaVersion: 1,
+      counts: { indexed: 1, duplicate: 0, failed: 0 },
+      results: [{ id: "mem-1", status: "indexed" }]
+    };
+
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(memoryResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    await import("../background/index");
+
+    const onMessageHandler = chromeMock.runtime.onMessage.addListener.mock.calls[0][0];
+
+    onMessageHandler(
+      {
+        schemaVersion: SCHEMA_VERSION,
+        type: "MEMORY_INDEX_REQUEST",
+        payload: {
+          schemaVersion: 1,
+          items: [{ id: "mem-1", text: "Example text" }],
+          flush: true
+        }
+      },
+      { tab: { id: 7 } } as chrome.runtime.MessageSender,
+      vi.fn()
+    );
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[1]?.[0]).toContain("/api/memory/index");
+    });
+
+    vi.runAllTimers();
+    vi.useRealTimers();
+
+    expect(chromeMock.tabs.sendMessage).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ type: "MEMORY_INDEX_RESULT" }),
+      expect.any(Function)
+    );
+  });
+
+  it("sends failure results when the memory queue overflows", async () => {
+    vi.useFakeTimers();
+
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await import("../background/index");
+
+    const onMessageHandler = chromeMock.runtime.onMessage.addListener.mock.calls[0][0];
+    const payloadItems = Array.from({ length: 31 }, (_, index) => ({
+      id: `overflow-${index}`,
+      sourceId: `overflow-${index}`,
+      text: `body ${index}`
+    }));
+
+    const sendResponse = vi.fn();
+    onMessageHandler(
+      {
+        schemaVersion: SCHEMA_VERSION,
+        type: "MEMORY_INDEX_REQUEST",
+        payload: { schemaVersion: 1, items: payloadItems }
+      },
+      { tab: { id: 42 } } as chrome.runtime.MessageSender,
+      sendResponse
+    );
+
+    const overflowCall = chromeMock.tabs.sendMessage.mock.calls.find(([, message]) => {
+      return (
+        (message as any).type === "MEMORY_INDEX_RESULT" &&
+        (message as any).payload?.counts?.failed === 1 &&
+        (message as any).payload?.results?.[0]?.message === "queue-overflow"
+      );
+    });
+
+    expect(overflowCall).toBeDefined();
+
+    vi.useRealTimers();
   });
 });

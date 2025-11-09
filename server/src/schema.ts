@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const SCHEMA_VERSION = 1 as const;
+export const MEMORY_SCHEMA_VERSION = 1 as const;
 
 const ItemSourceMetaSchema = z
   .object({
@@ -78,3 +79,62 @@ export const ErrorResponseSchema = z.object({
 });
 
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
+
+export const MemoryIndexItemSchema = z.object({
+  id: z.string().min(1, "id is required"),
+  sourceId: z.string().min(1).optional(),
+  text: z.string().min(1, "text is required"),
+  url: z.string().url().optional(),
+  title: z.string().min(1).optional(),
+  contentType: z.string().min(1).optional(),
+  capturedAt: z.string().datetime().optional(),
+  language: z.string().min(2).max(8).optional(),
+  imageTag: z.string().optional(),
+  imageData: z.string().optional()
+});
+
+export type MemoryIndexItem = z.infer<typeof MemoryIndexItemSchema>;
+
+export const MemoryIndexRequestSchema = z.object({
+  schemaVersion: z
+    .number()
+    .int()
+    .min(1)
+    .max(MEMORY_SCHEMA_VERSION)
+    .optional()
+    .default(MEMORY_SCHEMA_VERSION),
+  items: z.array(MemoryIndexItemSchema).min(1, "items are required")
+});
+
+export type MemoryIndexRequest = z.infer<typeof MemoryIndexRequestSchema>;
+
+export const MemoryIndexResultSchema = z.object({
+  id: z.string().min(1),
+  status: z.enum(["indexed", "duplicate", "failed"]),
+  message: z.string().optional(),
+  storedIds: z.array(z.string().min(1)).optional()
+});
+
+export type MemoryIndexResult = z.infer<typeof MemoryIndexResultSchema>;
+
+export const MemoryIndexResponseSchema = z.object({
+  schemaVersion: z.number().int().min(1),
+  counts: z.object({
+    indexed: z.number().int().nonnegative(),
+    duplicate: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative()
+  }),
+  results: z.array(MemoryIndexResultSchema)
+});
+
+export type MemoryIndexResponse = z.infer<typeof MemoryIndexResponseSchema>;
+
+export const MemoryStatsResponseSchema = z.object({
+  schemaVersion: z.number().int().min(1),
+  items: z.number().int().nonnegative(),
+  vectors: z.number().int().nonnegative(),
+  fileSizeBytes: z.number().int().nonnegative(),
+  lastPersistedAt: z.string().datetime().optional()
+});
+
+export type MemoryStatsResponse = z.infer<typeof MemoryStatsResponseSchema>;
