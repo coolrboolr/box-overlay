@@ -14,6 +14,7 @@ Enable users to search their local semantic memory through a lightweight assista
      - Uses embedding adapter from SPEC15 to embed the query.
      - Calls `MemoryStore.search`, trims snippets (≤320 chars), redacts base64 blobs, and returns ordered hits.
      - Honors optional filters: `domain`, `since`, `until`, `limit`.
+     - Request schema uses `z.object({ query: z.string().min(3), topK: z.number().int().min(1).max(8).default(4), filters: z.object({ domain: z.string().regex(HOST_OR_URL_REGEX).optional(), since: z.string().datetime().optional(), until: z.string().datetime().optional(), limit: z.number().int().min(1).max(50).optional() }).optional() })`. The domain validator must accept bare hostnames (`example.com`, subdomains) or full URLs; the route normalizes through `safeHostname` before handing off to the store so popup “This domain” never 400s.
    - Optional answer generation when `ENABLE_MEMORY_ANSWERS=true`: call Ollama chat endpoint with query + top hits, cap to ~120 words, and include `answer` + `sourceIds`.
    - Add supertest coverage with fake embeddings/LLM stubs.
 2. **Runtime Contract & Background Logic**
@@ -43,6 +44,46 @@ Enable users to search their local semantic memory through a lightweight assista
 - Provide keyboard shortcuts inside popup (Enter to search, `Cmd/Ctrl+L` to focus input).
 - Keep popup bundle size modest (<200 kB) by reusing existing utilities; lazy-load heavy components if needed.
 
+## API Contract
+- **Request (`POST /api/memory/query`)**
+  ```json
+  {
+    "schemaVersion": 1,
+    "query": "how do I summon the overlay?",
+    "topK": 4,
+    "filters": {
+      "domain": "docs.local.dev",
+      "since": "2025-10-01T00:00:00.000Z",
+      "until": "2025-11-14T00:00:00.000Z",
+      "limit": 20
+    }
+  }
+  ```
+- **Response**
+  ```json
+  {
+    "hits": [
+      {
+        "id": "mem_123",
+        "sourceId": "page_456",
+        "title": "Overlay quick start",
+        "url": "https://docs.local.dev/overlay",
+        "domain": "docs.local.dev",
+        "snippet": "Press Cmd+Shift+L to toggle the overlay…",
+        "capturedAt": "2025-11-10T22:10:00.000Z",
+        "similarity": 0.82,
+        "metadata": { "tags": ["overlay"] }
+      }
+    ],
+    "answer": "Press Cmd+Shift+L to bring up the overlay…",
+    "sourceIds": ["mem_123"]
+  }
+  ```
+- **Errors**
+  - `400 VALIDATION_ERROR`: schema mismatch (include which field failed).
+  - `503 UPSTREAM_UNAVAILABLE`: embedding or LLM adapter timed out (popup shows retry CTAs).
+  - `424 FEATURE_DISABLED`: returned when `ENABLE_MEMORY_ANSWERS` is false but popup asked for answer mode; background should downshift to results-only path.
+
 ## Dependencies
 - SPEC15 (memory backend foundation) and SPEC16 (ingestion) must be complete.
 
@@ -51,3 +92,4 @@ Enable users to search their local semantic memory through a lightweight assista
 - Popup allows users to submit queries, see loading/empty/error states, open/copy results, and view synthesized answers when available.
 - Rapid consecutive queries cancel older in-flight requests (verified via tests and manual inspection).
 - Documentation and automated tests cover backend search, background messaging, and popup rendering/UX flows.
+- Domain-scoped searches initiated via the “This domain” pill succeed whether the filter payload is a hostname or full URL; regression test captures host-only payload to prevent future 400s.

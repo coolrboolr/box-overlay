@@ -12,7 +12,8 @@ export default defineConfig((options) => {
   return {
     entry: {
       background: "src/background/index.ts",
-      content: "src/content/index.ts"
+      content: "src/content/index.ts",
+      popup: "src/popup/index.ts"
     },
     outDir: "dist",
     format: ["esm"],

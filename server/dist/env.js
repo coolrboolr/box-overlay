@@ -72,7 +72,17 @@ const EnvSchema = zod_1.z.object({
     USE_FAKE_EMBEDDINGS: zod_1.z
         .string()
         .optional()
-        .transform((value) => value === "true")
+        .transform((value) => value === "true"),
+    ENABLE_MEMORY_ANSWERS: zod_1.z
+        .string()
+        .optional()
+        .transform((value) => {
+        if (value === undefined) {
+            return false;
+        }
+        const normalized = value.trim().toLowerCase();
+        return normalized === "1" || normalized === "true";
+    })
 });
 const parsed = EnvSchema.parse(process.env);
 const repoRoot = node_path_1.default.resolve(__dirname, "..", "..");
@@ -113,6 +123,7 @@ exports.env = {
     memoryEmbedModel: parsed.MEMORY_EMBED_MODEL,
     memoryDedupThreshold: parsed.MEMORY_DEDUP_THRESHOLD,
     memoryMaxCharsPerChunk: parsed.MEMORY_MAX_CHARS_PER_CHUNK,
-    useFakeEmbeddings: parsed.USE_FAKE_EMBEDDINGS
+    useFakeEmbeddings: parsed.USE_FAKE_EMBEDDINGS,
+    enableMemoryAnswers: parsed.ENABLE_MEMORY_ANSWERS
 };
 //# sourceMappingURL=env.js.map

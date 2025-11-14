@@ -6,7 +6,9 @@ import {
   MEMORY_SCHEMA_VERSION,
   MemoryIndexItem,
   MemoryIndexResultSchema,
+  MemoryQueryHitSchema,
   type MemoryIndexResponse,
+  type MemoryQueryHit,
   type MemoryStatsResponse
 } from "../schema";
 import { cosineSimilarity, generateEmbedding, type EmbeddingGenerator } from "../services/embedding";
@@ -43,6 +45,14 @@ interface PersistenceFile {
   updatedAt: string;
   vectorLength: number;
   items: PersistenceRecord[];
+}
+
+export interface MemorySearchOptions {
+  vector: Float32Array;
+  topK: number;
+  domain?: string;
+  since?: string;
+  until?: string;
 }
 
 export class MemoryStore {
@@ -134,6 +144,53 @@ export class MemoryStore {
       fileSizeBytes: this.lastFileSizeBytes,
       lastPersistedAt: this.lastPersistedAt
     };
+  }
+
+  async search(options: MemorySearchOptions): Promise<MemoryQueryHit[]> {
+    await this.load();
+    const { vector, topK, domain, since, until } = options;
+
+    const sinceDate = since ? Date.parse(since) : null;
+    const untilDate = until ? Date.parse(until) : null;
+    const domainHost = domain ? safeHostname(domain) : null;
+
+    const scored = this.records
+      .filter((record) => {
+        if (domainHost && record.url) {
+          const recordHost = safeHostname(record.url);
+          if (recordHost !== domainHost) {
+            return false;
+          }
+        }
+        if (sinceDate && record.capturedAt && Date.parse(record.capturedAt) < sinceDate) {
+          return false;
+        }
+        if (untilDate && record.capturedAt && Date.parse(record.capturedAt) > untilDate) {
+          return false;
+        }
+        return true;
+      })
+      .map((record) => ({
+        record,
+        similarity: cosineSimilarity(vector, record.vector)
+      }))
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, topK);
+
+    return scored.map(({ record, similarity }) =>
+      MemoryQueryHitSchema.parse({
+        id: record.id,
+        parentId: record.parentId,
+        sourceId: record.sourceId,
+        url: record.url,
+        title: record.title,
+        snippet: record.snippet,
+        capturedAt: record.capturedAt,
+        contentType: record.contentType,
+        language: record.language,
+        similarity
+      })
+    );
   }
 
   private async initializeFromDisk(): Promise<void> {
@@ -315,4 +372,14 @@ function createSnippet(text: string, maxLength = 280): string {
     return text;
   }
   return `${text.slice(0, maxLength).trim()}...`;
+}
+
+function safeHostname(input: string): string | null {
+  try {
+    const normalized = input.includes("://") ? input : `https://${input}`;
+    const url = new URL(normalized);
+    return url.hostname.toLowerCase();
+  } catch {
+    return null;
+  }
 }

@@ -35,3 +35,6 @@ npm install
   `MEMORY_ENABLED=true`. With the feature on, the extension queues page content
   for `/api/memory/index`; use **Alt+Shift+M** (or the harness button) to flush
   immediately when you want to save the current page.
+- Click the toolbar icon to open the new popup and query your stored memories.
+  Use the “This domain” / “Past 7 days” filters to narrow results, copy snippets,
+  and (when enabled on the server) read the synthesized answer card.

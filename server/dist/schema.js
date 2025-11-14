@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MemoryStatsResponseSchema = exports.MemoryIndexResponseSchema = exports.MemoryIndexResultSchema = exports.MemoryIndexRequestSchema = exports.MemoryIndexItemSchema = exports.ErrorResponseSchema = exports.BatchAnalysisResponseSchema = exports.BatchAnalysisRequestSchema = exports.AnalyzeErrorSchema = exports.ItemAnalysisResponseSchema = exports.ItemAnalysisRequestSchema = exports.MEMORY_SCHEMA_VERSION = exports.SCHEMA_VERSION = void 0;
+exports.MemoryQueryResponseSchema = exports.MemoryQueryHitSchema = exports.MemoryQueryRequestSchema = exports.MemoryQueryFiltersSchema = exports.MemoryStatsResponseSchema = exports.MemoryIndexResponseSchema = exports.MemoryIndexResultSchema = exports.MemoryIndexRequestSchema = exports.MemoryIndexItemSchema = exports.ErrorResponseSchema = exports.BatchAnalysisResponseSchema = exports.BatchAnalysisRequestSchema = exports.AnalyzeErrorSchema = exports.ItemAnalysisResponseSchema = exports.ItemAnalysisRequestSchema = exports.MEMORY_SCHEMA_VERSION = exports.SCHEMA_VERSION = void 0;
 const zod_1 = require("zod");
 exports.SCHEMA_VERSION = 1;
 exports.MEMORY_SCHEMA_VERSION = 1;
@@ -104,5 +104,44 @@ exports.MemoryStatsResponseSchema = zod_1.z.object({
     vectors: zod_1.z.number().int().nonnegative(),
     fileSizeBytes: zod_1.z.number().int().nonnegative(),
     lastPersistedAt: zod_1.z.string().datetime().optional()
+});
+exports.MemoryQueryFiltersSchema = zod_1.z.object({
+    domain: zod_1.z.string().url().optional(),
+    since: zod_1.z.string().datetime().optional(),
+    until: zod_1.z.string().datetime().optional()
+});
+exports.MemoryQueryRequestSchema = zod_1.z.object({
+    schemaVersion: zod_1.z
+        .number()
+        .int()
+        .min(1)
+        .max(exports.MEMORY_SCHEMA_VERSION)
+        .optional()
+        .default(exports.MEMORY_SCHEMA_VERSION),
+    query: zod_1.z.string().min(1),
+    topK: zod_1.z.number().int().min(1).max(20).optional().default(5),
+    filters: exports.MemoryQueryFiltersSchema.optional()
+});
+exports.MemoryQueryHitSchema = zod_1.z.object({
+    id: zod_1.z.string().min(1),
+    parentId: zod_1.z.string().min(1),
+    sourceId: zod_1.z.string().optional(),
+    url: zod_1.z.string().url().optional(),
+    title: zod_1.z.string().optional(),
+    snippet: zod_1.z.string().min(1),
+    capturedAt: zod_1.z.string().datetime().optional(),
+    contentType: zod_1.z.string().optional(),
+    language: zod_1.z.string().optional(),
+    similarity: zod_1.z.number().min(-1).max(1)
+});
+exports.MemoryQueryResponseSchema = zod_1.z.object({
+    schemaVersion: zod_1.z.number().int().min(1),
+    results: zod_1.z.array(exports.MemoryQueryHitSchema),
+    answer: zod_1.z
+        .object({
+        text: zod_1.z.string().min(1),
+        sources: zod_1.z.array(zod_1.z.string().min(1))
+    })
+        .optional()
 });
 //# sourceMappingURL=schema.js.map

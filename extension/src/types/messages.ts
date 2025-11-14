@@ -87,6 +87,44 @@ export interface MemoryIndexResponse {
   results: MemoryIndexResult[];
 }
 
+export interface MemoryQueryFilters {
+  domain?: string;
+  since?: string;
+  until?: string;
+}
+
+export interface MemoryQueryRequestMessage {
+  query: string;
+  topK?: number;
+  filters?: MemoryQueryFilters;
+}
+
+export interface MemoryQueryHit {
+  id: string;
+  parentId: string;
+  sourceId?: string;
+  url?: string;
+  title?: string;
+  snippet: string;
+  capturedAt?: string;
+  contentType?: string;
+  language?: string;
+  similarity: number;
+}
+
+export interface MemoryQueryResponseMessage {
+  schemaVersion: typeof MEMORY_SCHEMA_VERSION;
+  results: MemoryQueryHit[];
+  answer?: {
+    text: string;
+    sources: string[];
+  };
+}
+
+export interface MemoryQueryErrorMessage {
+  message: string;
+}
+
 interface RuntimeMessageBase<Type extends string, Payload = undefined> {
   type: Type;
   schemaVersion: typeof SCHEMA_VERSION;
@@ -103,4 +141,7 @@ export type RuntimeMessage =
   | RuntimeMessageBase<"DEV_FORCE_REGISTER", undefined>
   | RuntimeMessageBase<"MEMORY_INDEX_REQUEST", MemoryIndexRequest>
   | RuntimeMessageBase<"MEMORY_INDEX_RESULT", MemoryIndexResponse>
-  | RuntimeMessageBase<"MEMORY_CAPTURE_NOW", { force?: boolean }>;
+  | RuntimeMessageBase<"MEMORY_CAPTURE_NOW", { force?: boolean }>
+  | RuntimeMessageBase<"MEMORY_QUERY", MemoryQueryRequestMessage>
+  | RuntimeMessageBase<"MEMORY_QUERY_RESULT", MemoryQueryResponseMessage>
+  | RuntimeMessageBase<"MEMORY_QUERY_ERROR", MemoryQueryErrorMessage>;

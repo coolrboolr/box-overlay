@@ -30,6 +30,7 @@ cp .env.example .env
 | `MEMORY_DEDUP_THRESHOLD` | Cosine similarity threshold for skipping duplicates | `0.9` |
 | `MEMORY_MAX_CHARS_PER_CHUNK` | Max characters per chunk when splitting long text | `1000` |
 | `USE_FAKE_EMBEDDINGS` | Return deterministic fake vectors (testing/CI) | `false` |
+| `ENABLE_MEMORY_ANSWERS` | Allow `/api/memory/query` to call the LLM for a synthesized answer | `false` |
 
 During local development you can keep `ALLOWED_EXTENSION_IDS` empty and rely on
 `ENABLE_DEV_EXTENSION_REGISTRATION=true`, which lets the unpacked MV3 build post its
@@ -78,6 +79,7 @@ before loading the extension.
 - `POST /api/analyze/batch` – (optional, gated by `ENABLE_BATCH_ANALYZE`) processes up to four items per request for faster local analysis.
 - `POST /api/memory/index` – (optional, gated by `MEMORY_ENABLED`) ingests one or more cleaned content items and stores embeddings locally.
 - `GET /api/memory/stats` – (optional) exposes the item/vector counts, file size, and last persistence timestamp for diagnostics.
+- `POST /api/memory/query` – (optional) searches the local semantic store, returning ranked snippets (and, when `ENABLE_MEMORY_ANSWERS=true`, a short synthesized answer).
 - `POST /api/dev/register-extension-origin?id=<extensionId>` – (dev only) allows an unpacked extension to register its Chrome origin dynamically so CORS checks pass. Call this after loading the unpacked build.
 - `POST /api/dev/clear-extension-origins` – wipes the in-memory + persisted dev registry, simulating a backend restart.
 - `GET /api/dev/allowed-extension-origins` – returns both static (`ALLOWED_EXTENSION_IDS`) and dynamically registered origins for diagnostics.

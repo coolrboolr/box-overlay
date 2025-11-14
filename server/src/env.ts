@@ -71,7 +71,17 @@ const EnvSchema = z.object({
   USE_FAKE_EMBEDDINGS: z
     .string()
     .optional()
-    .transform((value) => value === "true")
+    .transform((value) => value === "true"),
+  ENABLE_MEMORY_ANSWERS: z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (value === undefined) {
+        return false;
+      }
+      const normalized = value.trim().toLowerCase();
+      return normalized === "1" || normalized === "true";
+    })
 });
 
 const parsed = EnvSchema.parse(process.env);
@@ -120,5 +130,6 @@ export const env = {
   memoryEmbedModel: parsed.MEMORY_EMBED_MODEL,
   memoryDedupThreshold: parsed.MEMORY_DEDUP_THRESHOLD,
   memoryMaxCharsPerChunk: parsed.MEMORY_MAX_CHARS_PER_CHUNK,
-  useFakeEmbeddings: parsed.USE_FAKE_EMBEDDINGS
+  useFakeEmbeddings: parsed.USE_FAKE_EMBEDDINGS,
+  enableMemoryAnswers: parsed.ENABLE_MEMORY_ANSWERS
 };

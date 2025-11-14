@@ -8,6 +8,8 @@ import type {
   MemoryIndexItem,
   MemoryIndexRequest,
   MemoryIndexResponse,
+  MemoryQueryRequestMessage,
+  MemoryQueryResponseMessage,
   RuntimeMessage
 } from "../types/messages";
 import { SCHEMA_VERSION, MEMORY_SCHEMA_VERSION } from "../types/messages";
@@ -60,6 +62,7 @@ const ANALYZE_ENDPOINT = `${API_BASE_URL}/api/analyze`;
 const ANALYZE_BATCH_ENDPOINT = `${API_BASE_URL}/api/analyze/batch`;
 const REGISTER_ORIGIN_ENDPOINT = `${API_BASE_URL}/api/dev/register-extension-origin`;
 const MEMORY_INDEX_ENDPOINT = `${API_BASE_URL}/api/memory/index`;
+const MEMORY_QUERY_ENDPOINT = `${API_BASE_URL}/api/memory/query`;
 const REQUEST_TIMEOUT_MS = 25_000;
 const MAX_CONCURRENCY = 3;
 const MAX_RETRIES = 2;
@@ -94,6 +97,12 @@ interface MemoryQueueState {
 }
 
 const memoryQueues = new Map<number, MemoryQueueState>();
+interface MemoryQueryState {
+  controller?: AbortController;
+  token: number;
+}
+
+const memoryQueryControllers = new Map<number, MemoryQueryState>();
 
 interface BackendRequestOptions {
   onForbiddenRecovery?: () => void;
@@ -258,6 +267,15 @@ function scheduleMemoryFlush(tabId: number, options: { force?: boolean } = {}): 
     state.flushTimer = undefined;
     void flushMemoryQueue(tabId, state, options);
   }, Math.max(delay, 0));
+}
+
+function getMemoryQueryState(tabId: number): MemoryQueryState {
+  let state = memoryQueryControllers.get(tabId);
+  if (!state) {
+    state = { token: 0 };
+    memoryQueryControllers.set(tabId, state);
+  }
+  return state;
 }
 
 async function flushMemoryQueue(
@@ -792,6 +810,16 @@ async function sendMemoryIndexRequest(
   );
 }
 
+async function sendMemoryQueryRequest(
+  payload: MemoryQueryRequestMessage,
+  signal?: AbortSignal
+): Promise<MemoryQueryResponseMessage> {
+  return withDevRegistrationRetry(
+    () => performMemoryQuery(payload, signal),
+    "memory-query"
+  );
+}
+
 async function performMemoryIndexRequest(payload: MemoryIndexRequest): Promise<MemoryIndexResponse> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -854,6 +882,44 @@ async function performMemoryIndexRequest(payload: MemoryIndexRequest): Promise<M
     });
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+async function performMemoryQuery(
+  payload: MemoryQueryRequestMessage,
+  externalSignal?: AbortSignal
+): Promise<MemoryQueryResponseMessage> {
+  const controller = externalSignal ? null : new AbortController();
+  const timeoutId = controller ? setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS) : null;
+  const signal = externalSignal ?? controller?.signal;
+
+  try {
+    await ensureDevOriginRegistration();
+    const response = await fetch(MEMORY_QUERY_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: MEMORY_SCHEMA_VERSION,
+        query: payload.query,
+        topK: payload.topK,
+        filters: payload.filters
+      }),
+      signal
+    });
+
+    if (!response.ok) {
+      throw new BackendRequestError(`Memory query failed with HTTP ${response.status}`, {
+        retryable: response.status >= 500 || response.status === 429,
+        statusCode: response.status
+      });
+    }
+
+    const data = (await response.json()) as MemoryQueryResponseMessage;
+    return data;
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
   }
 }
 
@@ -1089,6 +1155,8 @@ chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
       return handleAnalyzeMessage(message.payload, sender, sendResponse);
     case "MEMORY_INDEX_REQUEST":
       return handleMemoryIndexMessage(message.payload, sender, sendResponse);
+    case "MEMORY_QUERY":
+      return handleMemoryQueryMessage(message.payload, sender, sendResponse);
     default:
       return false;
   }
@@ -1150,6 +1218,64 @@ function handleMemoryIndexMessage(
   return false;
 }
 
+function handleMemoryQueryMessage(
+  payload: MemoryQueryRequestMessage,
+  sender: chrome.runtime.MessageSender,
+  sendResponse?: (response?: unknown) => void
+): boolean {
+  const tabId = sender.tab?.id;
+  if (tabId == null) {
+    logError("Received MEMORY_QUERY without tabId");
+    return false;
+  }
+
+  if (!payload || typeof payload.query !== "string" || !payload.query.trim()) {
+    logError("Received invalid MEMORY_QUERY payload", payload);
+    return false;
+  }
+
+  const state = getMemoryQueryState(tabId);
+  state.controller?.abort();
+  state.token += 1;
+  const currentToken = state.token;
+  state.controller = new AbortController();
+
+  void (async () => {
+    try {
+      const response = await sendMemoryQueryRequest(
+        {
+          schemaVersion: MEMORY_SCHEMA_VERSION,
+          query: payload.query,
+          topK: payload.topK,
+          filters: payload.filters
+        },
+        state.controller?.signal
+      );
+      if (state.token !== currentToken) {
+        return;
+      }
+      chrome.runtime.sendMessage({
+        schemaVersion: SCHEMA_VERSION,
+        type: "MEMORY_QUERY_RESULT",
+        payload: response
+      });
+    } catch (error) {
+      if (state.token !== currentToken) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      chrome.runtime.sendMessage({
+        schemaVersion: SCHEMA_VERSION,
+        type: "MEMORY_QUERY_ERROR",
+        payload: { message }
+      });
+    }
+  })();
+
+  sendResponse?.({ accepted: true });
+  return false;
+}
+
 chrome.commands.onCommand.addListener((command) => {
   if (command === "toggle-overlays") {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -1197,6 +1323,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     clearTimeout(state.flushTimer);
   }
   memoryQueues.delete(tabId);
+  const queryState = memoryQueryControllers.get(tabId);
+  queryState?.controller?.abort();
+  memoryQueryControllers.delete(tabId);
 });
 
 if (typeof globalThis.addEventListener === "function") {

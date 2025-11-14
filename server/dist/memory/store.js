@@ -83,6 +83,47 @@ class MemoryStore {
             lastPersistedAt: this.lastPersistedAt
         };
     }
+    async search(options) {
+        await this.load();
+        const { vector, topK, domain, since, until } = options;
+        const sinceDate = since ? Date.parse(since) : null;
+        const untilDate = until ? Date.parse(until) : null;
+        const domainHost = domain ? safeHostname(domain) : null;
+        const scored = this.records
+            .filter((record) => {
+            if (domainHost && record.url) {
+                const recordHost = safeHostname(record.url);
+                if (recordHost !== domainHost) {
+                    return false;
+                }
+            }
+            if (sinceDate && record.capturedAt && Date.parse(record.capturedAt) < sinceDate) {
+                return false;
+            }
+            if (untilDate && record.capturedAt && Date.parse(record.capturedAt) > untilDate) {
+                return false;
+            }
+            return true;
+        })
+            .map((record) => ({
+            record,
+            similarity: (0, embedding_1.cosineSimilarity)(vector, record.vector)
+        }))
+            .sort((a, b) => b.similarity - a.similarity)
+            .slice(0, topK);
+        return scored.map(({ record, similarity }) => schema_1.MemoryQueryHitSchema.parse({
+            id: record.id,
+            parentId: record.parentId,
+            sourceId: record.sourceId,
+            url: record.url,
+            title: record.title,
+            snippet: record.snippet,
+            capturedAt: record.capturedAt,
+            contentType: record.contentType,
+            language: record.language,
+            similarity
+        }));
+    }
     async initializeFromDisk() {
         await promises_1.default.mkdir(node_path_1.default.dirname(this.dbPath), { recursive: true });
         try {
@@ -121,7 +162,7 @@ class MemoryStore {
         for (const chunk of textChunks) {
             const vector = await this.embedText(chunk);
             this.ensureVectorDimension(vector.length);
-            if (this.isDuplicate(vector, item.url)) {
+            if (this.isDuplicate(vector, item.sourceId)) {
                 continue;
             }
             const record = {
@@ -153,9 +194,9 @@ class MemoryStore {
             throw new Error(`Embedding dimension mismatch: expected ${this.vectorLength}, received ${length}`);
         }
     }
-    isDuplicate(vector, url) {
+    isDuplicate(vector, sourceId) {
         for (const record of this.records) {
-            if (url && record.url && record.url === url) {
+            if (sourceId && record.sourceId && record.sourceId === sourceId) {
                 return true;
             }
             const similarity = (0, embedding_1.cosineSimilarity)(vector, record.vector);
@@ -246,5 +287,15 @@ function createSnippet(text, maxLength = 280) {
         return text;
     }
     return `${text.slice(0, maxLength).trim()}...`;
+}
+function safeHostname(input) {
+    try {
+        const normalized = input.includes("://") ? input : `https://${input}`;
+        const url = new URL(normalized);
+        return url.hostname.toLowerCase();
+    }
+    catch {
+        return null;
+    }
 }
 //# sourceMappingURL=store.js.map

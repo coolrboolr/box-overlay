@@ -9,7 +9,8 @@
     "type": "module"
   },
   "action": {
-    "default_title": "LLM Overlay Dev"
+    "default_title": "LLM Overlay Dev",
+    "default_popup": "popup.html"
   },
   "permissions": [
     "storage",

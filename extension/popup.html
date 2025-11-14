@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Memory Search</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 12px;
+        width: 360px;
+        min-height: 420px;
+        background: #0f172a0d;
+      }
+      h1 {
+        font-size: 16px;
+        margin: 0 0 8px;
+      }
+      form {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      input[type="text"] {
+        flex: 1;
+        padding: 8px;
+        border-radius: 8px;
+        border: 1px solid #cbd5f5;
+        font: inherit;
+      }
+      button {
+        font: inherit;
+        border-radius: 8px;
+        border: none;
+        padding: 8px 12px;
+        cursor: pointer;
+        background: #0f172a;
+        color: #fff;
+      }
+      button.secondary {
+        background: #e5e7eb;
+        color: #1f2937;
+      }
+      button.active {
+        background: #2563eb;
+        color: white;
+      }
+      .filters {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      #status {
+        font-size: 13px;
+        color: #475569;
+        min-height: 18px;
+        margin-bottom: 6px;
+      }
+      #error {
+        font-size: 13px;
+        color: #dc2626;
+        min-height: 18px;
+      }
+      #answer {
+        background: #f5f6ff;
+        border-radius: 10px;
+        padding: 10px;
+        margin-bottom: 10px;
+      }
+      #answer h2 {
+        font-size: 14px;
+        margin: 0 0 6px;
+      }
+      #answer p {
+        margin: 0 0 6px;
+      }
+      #answer ul {
+        padding-left: 16px;
+        margin: 0;
+        font-size: 12px;
+      }
+      #results {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin: 0;
+      }
+      .result {
+        background: #fff;
+        border-radius: 10px;
+        padding: 10px;
+        box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+      }
+      .result h3 {
+        font-size: 14px;
+        margin: 0 0 4px;
+      }
+      .result p {
+        margin: 0 0 6px;
+        font-size: 13px;
+      }
+      .meta {
+        color: #6b7280;
+        font-size: 12px;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+      }
+      .actions button {
+        flex: 1 1 auto;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Search Memory</h1>
+    <form id="query-form">
+      <input id="query-input" type="text" placeholder="e.g. async React article" />
+      <button id="search-button" type="submit">Search</button>
+    </form>
+    <div class="filters">
+      <button id="filter-domain" type="button" class="secondary">This domain</button>
+      <button id="filter-recent" type="button" class="secondary">Past 7 days</button>
+    </div>
+    <div id="status"></div>
+    <div id="error"></div>
+    <section id="answer" hidden>
+      <h2>Answer</h2>
+      <p></p>
+      <strong>Sources</strong>
+      <ul></ul>
+    </section>
+    <section id="results"></section>
+    <script type="module" src="dist/popup.js"></script>
+  </body>
+</html>

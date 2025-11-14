@@ -123,6 +123,18 @@ These tools are dev-only (`isDev` builds). They never run in production bundles.
 4. Inspect the background console for `[memory]` logs and check `curl /api/memory/stats` to
    confirm new items were stored.
 
+## Querying Memory via Popup
+
+1. Build/watch the extension (`npm run watch`) and load it in Chrome.
+2. Click the extension action icon to open the popup. Enter a natural-language question and hit **Search**.
+3. Use the filter pills:
+   - **This domain** limits results to the active tab’s hostname.
+   - **Past 7 days** restricts by capture timestamp.
+4. Results show title, snippet, similarity, and actions to open the source or copy the snippet. When
+   `ENABLE_MEMORY_ANSWERS=true` on the server, an “Answer” card appears summarizing the top matches.
+5. Background devtools should log `/api/memory/query` calls; the popup console logs incoming
+   `MEMORY_QUERY_RESULT` messages for debugging.
+
 ## Chrome Extension Workflow
 
 1. In a separate terminal, build/watch the extension:

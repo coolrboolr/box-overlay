@@ -138,3 +138,52 @@ export const MemoryStatsResponseSchema = z.object({
 });
 
 export type MemoryStatsResponse = z.infer<typeof MemoryStatsResponseSchema>;
+
+export const MemoryQueryFiltersSchema = z.object({
+  domain: z.string().url().optional(),
+  since: z.string().datetime().optional(),
+  until: z.string().datetime().optional()
+});
+
+export const MemoryQueryRequestSchema = z.object({
+  schemaVersion: z
+    .number()
+    .int()
+    .min(1)
+    .max(MEMORY_SCHEMA_VERSION)
+    .optional()
+    .default(MEMORY_SCHEMA_VERSION),
+  query: z.string().min(1),
+  topK: z.number().int().min(1).max(20).optional().default(5),
+  filters: MemoryQueryFiltersSchema.optional()
+});
+
+export type MemoryQueryRequest = z.infer<typeof MemoryQueryRequestSchema>;
+
+export const MemoryQueryHitSchema = z.object({
+  id: z.string().min(1),
+  parentId: z.string().min(1),
+  sourceId: z.string().optional(),
+  url: z.string().url().optional(),
+  title: z.string().optional(),
+  snippet: z.string().min(1),
+  capturedAt: z.string().datetime().optional(),
+  contentType: z.string().optional(),
+  language: z.string().optional(),
+  similarity: z.number().min(-1).max(1)
+});
+
+export type MemoryQueryHit = z.infer<typeof MemoryQueryHitSchema>;
+
+export const MemoryQueryResponseSchema = z.object({
+  schemaVersion: z.number().int().min(1),
+  results: z.array(MemoryQueryHitSchema),
+  answer: z
+    .object({
+      text: z.string().min(1),
+      sources: z.array(z.string().min(1))
+    })
+    .optional()
+});
+
+export type MemoryQueryResponse = z.infer<typeof MemoryQueryResponseSchema>;

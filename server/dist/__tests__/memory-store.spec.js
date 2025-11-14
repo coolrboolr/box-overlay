@@ -57,6 +57,45 @@ const tempDirs = [];
         const persistedStats = await reloaded.stats();
         (0, vitest_1.expect)(persistedStats.items).toBe(1);
     });
+    (0, vitest_1.it)("stores multiple chunks from the same URL when text differs", async () => {
+        const dbPath = await createTempPath();
+        let call = 0;
+        const orthogonalEmbed = vitest_1.vi.fn(async () => {
+            const vectors = [
+                new Float32Array([1, 0]),
+                new Float32Array([0, 1])
+            ];
+            const vector = vectors[call] ?? vectors[1];
+            call += 1;
+            return vector;
+        });
+        const store = new store_1.MemoryStore({
+            dbPath,
+            dedupThreshold: 0.8,
+            maxCharsPerChunk: 256,
+            embed: orthogonalEmbed
+        });
+        await store.ingest([
+            {
+                id: "card-1",
+                sourceId: "card-1",
+                text: "First article content",
+                url: "https://example.com/feed",
+                title: "Feed",
+                capturedAt: new Date().toISOString()
+            },
+            {
+                id: "card-2",
+                sourceId: "card-2",
+                text: "Second article content with different angle",
+                url: "https://example.com/feed",
+                title: "Feed",
+                capturedAt: new Date().toISOString()
+            }
+        ]);
+        const stats = await store.stats();
+        (0, vitest_1.expect)(stats.items).toBe(2);
+    });
 });
 async function createTempPath() {
     const dir = await promises_1.default.mkdtemp(node_path_1.default.join(node_os_1.default.tmpdir(), "memory-store-"));
