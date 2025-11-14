@@ -14,7 +14,15 @@ async function generateMemoryAnswer(query, hits) {
         const context = hits
             .map((hit, index) => {
             const title = hit.title || hit.url || `Snippet ${index + 1}`;
-            return `${index + 1}. Title: ${title}\nSnippet: ${hit.snippet}`;
+            const metaParts = [
+                hit.entityType ? `Entity: ${hit.entityType}` : null,
+                hit.conceptIds?.length ? `Concept IDs: ${hit.conceptIds.join(", ")}` : null,
+                hit.sourceDomain ? `Domain: ${hit.sourceDomain}` : null
+            ]
+                .filter(Boolean)
+                .join(" | ");
+            const metadataLine = metaParts ? `Metadata: ${metaParts}\n` : "";
+            return `${index + 1}. Title: ${title}\n${metadataLine}Snippet: ${hit.snippet}`;
         })
             .join("\n\n");
         const prompt = `You are a local assistant that answers the user's question using the provided saved snippets. ` +
@@ -38,7 +46,8 @@ async function generateMemoryAnswer(query, hits) {
         const parsed = parseAnswer(json.response);
         return {
             text: parsed.answer,
-            sources: parsed.sources?.length ? parsed.sources : hits.map((hit) => hit.title || hit.url || hit.id)
+            sources: parsed.sources?.length ? parsed.sources : hits.map((hit) => hit.title || hit.url || hit.id),
+            sourceIds: hits.map((hit) => hit.id)
         };
     }
     finally {

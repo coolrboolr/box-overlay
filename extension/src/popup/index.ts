@@ -9,6 +9,8 @@ import {
 interface FiltersState {
   domain?: string;
   since?: string;
+  entityTypes?: string[];
+  conceptIds?: string[];
 }
 
 export class PopupController {
@@ -20,8 +22,12 @@ export class PopupController {
   private errorEl: HTMLElement;
   private domainFilterBtn: HTMLButtonElement;
   private recentFilterBtn: HTMLButtonElement;
+  private entityFilterBtn: HTMLButtonElement;
+  private conceptFilterBtn: HTMLButtonElement;
   private activeDomain?: string;
   private filters: FiltersState = {};
+  private entityOptions = ["article", "product", "person", "brand", "unknown"] as const;
+  private entityIndex = -1;
 
   constructor(private readonly doc: Document = document) {
     this.queryInput = this.require<HTMLInputElement>("query-input");
@@ -32,6 +38,8 @@ export class PopupController {
     this.errorEl = this.require<HTMLElement>("error");
     this.domainFilterBtn = this.require<HTMLButtonElement>("filter-domain");
     this.recentFilterBtn = this.require<HTMLButtonElement>("filter-recent");
+    this.entityFilterBtn = this.require<HTMLButtonElement>("filter-entity");
+    this.conceptFilterBtn = this.require<HTMLButtonElement>("filter-concept");
 
     this.doc.getElementById("query-form")?.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -65,6 +73,14 @@ export class PopupController {
         this.filters.since = since;
         this.recentFilterBtn.classList.add("active");
       }
+    });
+
+    this.entityFilterBtn.addEventListener("click", () => {
+      this.cycleEntityFilter();
+    });
+
+    this.conceptFilterBtn.addEventListener("click", () => {
+      this.toggleConceptFilter();
     });
 
     chrome.runtime.onMessage.addListener((message) => {
@@ -131,6 +147,38 @@ export class PopupController {
         this.setError(err.message ?? "Unable to issue query");
       }
     });
+  }
+
+  private cycleEntityFilter(): void {
+    this.entityIndex += 1;
+    if (this.entityIndex >= this.entityOptions.length) {
+      this.entityIndex = -1;
+      delete this.filters.entityTypes;
+      this.entityFilterBtn.textContent = "All entities";
+      this.entityFilterBtn.classList.remove("active");
+      return;
+    }
+    const selected = this.entityOptions[this.entityIndex];
+    this.filters.entityTypes = [selected];
+    this.entityFilterBtn.textContent = `Entity: ${selected}`;
+    this.entityFilterBtn.classList.add("active");
+  }
+
+  private toggleConceptFilter(): void {
+    if (this.filters.conceptIds?.length) {
+      delete this.filters.conceptIds;
+      this.conceptFilterBtn.textContent = "Concept filter";
+      this.conceptFilterBtn.classList.remove("active");
+      return;
+    }
+    const concept = this.doc.defaultView?.prompt("Filter by concept ID", this.activeDomain ?? "") ?? "";
+    const trimmed = concept.trim();
+    if (!trimmed) {
+      return;
+    }
+    this.filters.conceptIds = [trimmed];
+    this.conceptFilterBtn.textContent = `Concept: ${trimmed}`;
+    this.conceptFilterBtn.classList.add("active");
   }
 
   private setLoading(): void {

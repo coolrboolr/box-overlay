@@ -4,8 +4,8 @@ exports.buildPrompt = buildPrompt;
 const SYSTEM_PROMPT = "You are a local assistant that summarizes on-page content, provides a short image tag when helpful, and decides whether the item is an advertisement.";
 const OUTPUT_SCHEMA = `{
   "summary": "string (1-2 sentences)",
-  "image_tag": "string (optional, 2-3 descriptive words)",
-  "is_ad": "boolean"
+  "image": {"kind":"tag","tag":"string"} | null,
+  "isAd": "boolean"
 }`;
 const REMINDER = "Respond with strictly valid JSON matching the schema above. Do not include markdown fences, comments, or additional text.";
 function buildPrompt({ text, imageTagHint, hasImage, retry }) {
@@ -16,7 +16,7 @@ function buildPrompt({ text, imageTagHint, hasImage, retry }) {
         REMINDER
     ];
     if (retry) {
-        sections.push("STRICT MODE: Your previous response was not valid JSON. Return ONLY the JSON object with keys summary, image_tag, is_ad.");
+        sections.push("STRICT MODE: Your previous response was not valid JSON. Return ONLY the JSON object with keys summary, image, isAd.");
     }
     const trimmedText = text.trim();
     sections.push(`TEXT:\n${trimmedText}`);

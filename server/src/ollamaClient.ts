@@ -118,22 +118,21 @@ export async function callOllama(
   }
 }
 
-function extractImageData(image?: string): string | undefined {
+function extractImageData(image?: ItemAnalysisRequest["image"]): string | undefined {
   if (!image) {
     return undefined;
   }
 
-  if (image.startsWith("data:")) {
-    const commaIndex = image.indexOf(",");
+  if (image.kind === "dataUri") {
+    const commaIndex = image.data.indexOf(",");
     if (commaIndex >= 0) {
-      return image.slice(commaIndex + 1);
+      return image.data.slice(commaIndex + 1);
     }
-    return image;
+    return image.data;
   }
 
-  // If the extension ever passes raw base64 or URLs, only forward when base64 is detected.
-  if (/^[a-z0-9+/=]+$/i.test(image)) {
-    return image;
+  if (image.kind === "tag") {
+    return undefined;
   }
 
   return undefined;
@@ -162,8 +161,12 @@ function normalizeResponse(raw: unknown, input: ItemAnalysisRequest): ItemAnalys
   const record = raw as Record<string, unknown>;
   const summary = typeof record.summary === "string" ? record.summary.trim() : "";
   const imageTagRaw =
-    typeof record.image_tag === "string" ? record.image_tag.trim() : undefined;
-  const isAdRaw = record.is_ad;
+    typeof record.image_tag === "string"
+      ? record.image_tag.trim()
+      : typeof record.imageTag === "string"
+      ? record.imageTag.trim()
+      : undefined;
+  const isAdRaw = record.is_ad ?? record.isAd;
 
   const normalizedSummary = truncate(summary, 280);
   const normalizedImageTag = imageTagRaw ? limitWords(imageTagRaw, 3) : undefined;
@@ -172,8 +175,8 @@ function normalizeResponse(raw: unknown, input: ItemAnalysisRequest): ItemAnalys
   return {
     id: input.id,
     summary: normalizedSummary || defaultSummary(input.text),
-    image_tag: normalizedImageTag,
-    is_ad: normalizedIsAd
+    image: normalizedImageTag ? { kind: "tag", tag: normalizedImageTag } : undefined,
+    isAd: normalizedIsAd
   };
 }
 
@@ -220,7 +223,7 @@ function mockResponse(input: ItemAnalysisRequest): ItemAnalysisResponse {
   return {
     id: input.id,
     summary: truncate(input.text.replace(/\s+/g, " ").trim(), 200),
-    image_tag: input.image ? "generic image" : undefined,
-    is_ad: false
+    image: input.image?.kind === "tag" ? { kind: "tag", tag: input.image.tag } : undefined,
+    isAd: false
   };
 }

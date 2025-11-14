@@ -441,8 +441,8 @@
             payload: {
               id: request.id,
               summary,
-              image_tag: imageTag,
-              is_ad: flagAds || /sponsored|deal/i.test(request.text)
+              image: imageTag ? { kind: "tag", tag: imageTag } : undefined,
+              isAd: flagAds || /sponsored|deal/i.test(request.text)
             }
           };
         }

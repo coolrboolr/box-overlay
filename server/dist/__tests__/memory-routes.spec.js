@@ -58,7 +58,10 @@ async function createStore() {
     const store = new store_1.MemoryStore({
         dbPath: node_path_1.default.join(dir, "store.json"),
         dedupThreshold: 0.9,
+        dedupKey: "cosine",
         maxCharsPerChunk: 256,
+        embedModelVersion: "test-model@1",
+        allowModelMismatch: true,
         embed: fakeEmbed
     });
     await store.load();
@@ -72,7 +75,7 @@ function buildPayload(id, url) {
         url,
         title: "Example",
         capturedAt: new Date().toISOString(),
-        contentType: "article",
+        contentType: "text/html",
         language: "en"
     };
 }

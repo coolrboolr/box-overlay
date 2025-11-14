@@ -65,7 +65,7 @@ describe("background dev origin handling", () => {
     const analyzeResponse = {
       id: "forbidden-item",
       summary: "Recovered",
-      is_ad: false
+      isAd: false
     };
 
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));

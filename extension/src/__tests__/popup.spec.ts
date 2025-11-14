@@ -12,6 +12,8 @@ function setupDom() {
     <div class="filters">
       <button id="filter-domain" type="button"></button>
       <button id="filter-recent" type="button"></button>
+      <button id="filter-entity" type="button"></button>
+      <button id="filter-concept" type="button"></button>
     </div>
     <div id="status"></div>
     <div id="error"></div>

@@ -61,7 +61,8 @@ describe("memory query endpoint", () => {
     vi.mock("../services/memoryAnswer", () => ({
       generateMemoryAnswer: vi.fn(async () => ({
         text: "Memory response",
-        sources: ["Snippet"]
+        sources: ["Snippet"],
+        sourceIds: ["alpha"]
       }))
     }));
 
@@ -91,7 +92,10 @@ async function createPopulatedStore(): Promise<MemoryStore> {
   const store = new MemoryStore({
     dbPath: path.join(dir, "store.json"),
     dedupThreshold: 0.5,
+    dedupKey: "cosine",
     maxCharsPerChunk: 512,
+    embedModelVersion: "test-model@1",
+    allowModelMismatch: true,
     embed: fakeEmbed
   });
   await store.load();

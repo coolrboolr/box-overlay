@@ -9,7 +9,7 @@ interface MemoryAnswerResponse {
 export async function generateMemoryAnswer(
   query: string,
   hits: MemoryQueryHit[]
-): Promise<{ text: string; sources: string[] }> {
+): Promise<{ text: string; sources: string[]; sourceIds: string[] }> {
   if (!env.enableMemoryAnswers) {
     throw new Error("Memory answers disabled");
   }
@@ -23,7 +23,15 @@ export async function generateMemoryAnswer(
     const context = hits
       .map((hit, index) => {
         const title = hit.title || hit.url || `Snippet ${index + 1}`;
-        return `${index + 1}. Title: ${title}\nSnippet: ${hit.snippet}`;
+        const metaParts = [
+          hit.entityType ? `Entity: ${hit.entityType}` : null,
+          hit.conceptIds?.length ? `Concept IDs: ${hit.conceptIds.join(", ")}` : null,
+          hit.sourceDomain ? `Domain: ${hit.sourceDomain}` : null
+        ]
+          .filter(Boolean)
+          .join(" | ");
+        const metadataLine = metaParts ? `Metadata: ${metaParts}\n` : "";
+        return `${index + 1}. Title: ${title}\n${metadataLine}Snippet: ${hit.snippet}`;
       })
       .join("\n\n");
 
@@ -52,7 +60,8 @@ export async function generateMemoryAnswer(
     const parsed = parseAnswer(json.response);
     return {
       text: parsed.answer,
-      sources: parsed.sources?.length ? parsed.sources : hits.map((hit) => hit.title || hit.url || hit.id)
+      sources: parsed.sources?.length ? parsed.sources : hits.map((hit) => hit.title || hit.url || hit.id),
+      sourceIds: hits.map((hit) => hit.id)
     };
   } finally {
     clearTimeout(timeoutId);

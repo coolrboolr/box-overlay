@@ -85,7 +85,8 @@ const tempDirs = [];
         vitest_1.vi.mock("../services/memoryAnswer", () => ({
             generateMemoryAnswer: vitest_1.vi.fn(async () => ({
                 text: "Memory response",
-                sources: ["Snippet"]
+                sources: ["Snippet"],
+                sourceIds: ["alpha"]
             }))
         }));
         vitest_1.vi.spyOn(embeddingService, "generateEmbedding").mockResolvedValue(new Float32Array([1, 0, 0, 0]));
@@ -110,7 +111,10 @@ async function createPopulatedStore() {
     const store = new store_1.MemoryStore({
         dbPath: node_path_1.default.join(dir, "store.json"),
         dedupThreshold: 0.5,
+        dedupKey: "cosine",
         maxCharsPerChunk: 512,
+        embedModelVersion: "test-model@1",
+        allowModelMismatch: true,
         embed: fakeEmbed
     });
     await store.load();

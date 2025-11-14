@@ -10,7 +10,7 @@ import type { ItemAnalysisResponse } from "../types/messages";
 const baseResponse: ItemAnalysisResponse = {
   id: "overlay-test",
   summary: "Initial summary",
-  is_ad: false
+  isAd: false
 };
 
 describe("overlay renderer", () => {
@@ -52,7 +52,11 @@ describe("overlay renderer", () => {
   });
 
   it("applies ad styling and tag metadata when resolved", () => {
-    renderOverlay(target, { ...baseResponse, image_tag: "editorial", is_ad: true }, { status: "resolved" });
+    renderOverlay(
+      target,
+      { ...baseResponse, image: { kind: "tag", tag: "editorial" }, isAd: true },
+      { status: "resolved" }
+    );
     const card = document.querySelector(".llm-overlay-card");
     expect(card?.classList.contains("llm-overlay-card--ad")).toBe(true);
     expect(card?.querySelector(".llm-overlay-tag")?.textContent).toBe("editorial");

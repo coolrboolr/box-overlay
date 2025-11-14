@@ -22,7 +22,10 @@ const tempDirs = [];
         const store = new store_1.MemoryStore({
             dbPath,
             dedupThreshold: 0.9,
+            dedupKey: "cosine",
             maxCharsPerChunk: 64,
+            embedModelVersion: "test-model@1",
+            allowModelMismatch: true,
             embed: fakeEmbed
         });
         await store.load();
@@ -50,7 +53,10 @@ const tempDirs = [];
         const reloaded = new store_1.MemoryStore({
             dbPath,
             dedupThreshold: 0.9,
+            dedupKey: "cosine",
             maxCharsPerChunk: 64,
+            embedModelVersion: "test-model@1",
+            allowModelMismatch: true,
             embed: fakeEmbed
         });
         await reloaded.load();
@@ -72,7 +78,10 @@ const tempDirs = [];
         const store = new store_1.MemoryStore({
             dbPath,
             dedupThreshold: 0.8,
+            dedupKey: "cosine",
             maxCharsPerChunk: 256,
+            embedModelVersion: "test-model@1",
+            allowModelMismatch: true,
             embed: orthogonalEmbed
         });
         await store.ingest([
@@ -95,6 +104,108 @@ const tempDirs = [];
         ]);
         const stats = await store.stats();
         (0, vitest_1.expect)(stats.items).toBe(2);
+    });
+    (0, vitest_1.it)("marks duplicates using hash strategy", async () => {
+        const dbPath = await createTempPath();
+        const store = new store_1.MemoryStore({
+            dbPath,
+            dedupThreshold: 0.9,
+            dedupKey: "hash",
+            maxCharsPerChunk: 256,
+            embedModelVersion: "test-model@1",
+            allowModelMismatch: true,
+            embed: fakeEmbed
+        });
+        await store.load();
+        const payload = {
+            id: "hash-a",
+            text: "Identical hash content",
+            sourceId: "hash-a",
+            url: "https://example.dev/a"
+        };
+        const first = await store.ingest([payload]);
+        (0, vitest_1.expect)(first.counts.indexed).toBe(1);
+        const second = await store.ingest([{ ...payload, id: "hash-b", sourceId: "hash-b" }]);
+        (0, vitest_1.expect)(second.counts.duplicate).toBe(1);
+        (0, vitest_1.expect)(second.results[0]?.duplicateOf).toBeDefined();
+    });
+    (0, vitest_1.it)("filters search results by entity type and concepts", async () => {
+        const dbPath = await createTempPath();
+        const store = new store_1.MemoryStore({
+            dbPath,
+            dedupThreshold: 0.5,
+            dedupKey: "cosine",
+            maxCharsPerChunk: 256,
+            embedModelVersion: "test-model@1",
+            allowModelMismatch: true,
+            embed: fakeEmbed
+        });
+        await store.load();
+        await store.ingest([
+            {
+                id: "concept-a",
+                text: "Product guide snippet",
+                entityType: "product",
+                conceptIds: ["concept:product"],
+                url: "https://example.dev/product"
+            },
+            {
+                id: "concept-b",
+                text: "Article snippet body",
+                entityType: "article",
+                conceptIds: ["concept:article"],
+                url: "https://example.dev/article"
+            }
+        ]);
+        const vector = await fakeEmbed("Product guide snippet");
+        const results = await store.search({
+            vector,
+            topK: 2,
+            entityTypes: ["product"],
+            conceptIds: ["concept:product"]
+        });
+        (0, vitest_1.expect)(results).toHaveLength(1);
+        (0, vitest_1.expect)(results[0]?.entityType).toBe("product");
+    });
+    (0, vitest_1.it)("migrates legacy persistence payloads that lack embed metadata", async () => {
+        const dbPath = await createTempPath();
+        const legacy = {
+            schemaVersion: 1,
+            updatedAt: new Date().toISOString(),
+            vectorLength: 2,
+            items: [
+                {
+                    id: "legacy",
+                    parentId: "legacy",
+                    sourceId: "legacy",
+                    text: "Legacy chunk",
+                    snippet: "Legacy chunk",
+                    vector: [1, 0],
+                    url: "https://legacy.dev/path",
+                    title: "Legacy",
+                    contentType: "text/html",
+                    createdAt: new Date().toISOString()
+                }
+            ]
+        };
+        await promises_1.default.writeFile(dbPath, JSON.stringify(legacy));
+        const store = new store_1.MemoryStore({
+            dbPath,
+            dedupThreshold: 0.9,
+            dedupKey: "cosine",
+            maxCharsPerChunk: 256,
+            embedModelVersion: "test-model@1",
+            allowModelMismatch: true,
+            embed: fakeEmbed
+        });
+        await store.load();
+        const stats = await store.stats();
+        (0, vitest_1.expect)(stats.embedModelVersion).toBe("test-model@1");
+        const hits = await store.search({
+            vector: new Float32Array([1, 0]),
+            topK: 1
+        });
+        (0, vitest_1.expect)(hits[0]?.sourceDomain).toBe("legacy.dev");
     });
 });
 async function createTempPath() {

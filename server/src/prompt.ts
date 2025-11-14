@@ -10,8 +10,8 @@ const SYSTEM_PROMPT =
 
 const OUTPUT_SCHEMA = `{
   "summary": "string (1-2 sentences)",
-  "image_tag": "string (optional, 2-3 descriptive words)",
-  "is_ad": "boolean"
+  "image": {"kind":"tag","tag":"string"} | null,
+  "isAd": "boolean"
 }`;
 
 const REMINDER =
@@ -27,7 +27,7 @@ export function buildPrompt({ text, imageTagHint, hasImage, retry }: PromptInput
 
   if (retry) {
     sections.push(
-      "STRICT MODE: Your previous response was not valid JSON. Return ONLY the JSON object with keys summary, image_tag, is_ad."
+      "STRICT MODE: Your previous response was not valid JSON. Return ONLY the JSON object with keys summary, image, isAd."
     );
   }
 

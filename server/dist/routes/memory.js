@@ -70,12 +70,16 @@ function createMemoryRouter(options) {
         try {
             const { query, topK, filters } = parseResult.data;
             const vector = await (0, embedding_1.generateEmbedding)(query);
+            const effectiveTopK = Math.min(topK, filters?.limit ?? topK);
             const hits = await store.search({
                 vector,
-                topK,
+                topK: effectiveTopK,
                 domain: filters?.domain,
+                domains: filters?.domains,
                 since: filters?.since,
-                until: filters?.until
+                until: filters?.until,
+                entityTypes: filters?.entityTypes,
+                conceptIds: filters?.conceptIds
             });
             let answer;
             if (env_1.env.enableMemoryAnswers && hits.length) {
@@ -101,6 +105,48 @@ function createMemoryRouter(options) {
             }));
         }
     });
+    router.patch("/items/:id", async (req, res) => {
+        const mutationResult = schema_1.MemoryMutationSchema.safeParse(req.body);
+        if (!mutationResult.success) {
+            return res.status(400).json(schema_1.ErrorResponseSchema.parse({
+                error: "VALIDATION_ERROR",
+                message: "Invalid mutation payload",
+                details: mutationResult.error.format()
+            }));
+        }
+        try {
+            const updated = await store.mutateItem(req.params.id, mutationResult.data);
+            if (!updated) {
+                return res.status(404).json(schema_1.ErrorResponseSchema.parse({
+                    error: "NOT_FOUND",
+                    message: "Memory chunk not found"
+                }));
+            }
+            return res.json(updated);
+        }
+        catch (error) {
+            console.error("[memory] mutation failed", error);
+            return res.status(500).json(schema_1.ErrorResponseSchema.parse({
+                error: "INTERNAL_ERROR",
+                message: "Failed to update memory item"
+            }));
+        }
+    });
+    if (env_1.env.enableMemoryAdmin) {
+        router.post("/admin/compact", async (_req, res) => {
+            try {
+                await store.compact();
+                return res.json({ status: "ok" });
+            }
+            catch (error) {
+                console.error("[memory] compaction failed", error);
+                return res.status(500).json(schema_1.ErrorResponseSchema.parse({
+                    error: "INTERNAL_ERROR",
+                    message: "Compaction failed"
+                }));
+            }
+        });
+    }
     return router;
 }
 //# sourceMappingURL=memory.js.map

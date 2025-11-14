@@ -31,7 +31,10 @@ async function createServerApp(options = {}) {
             memoryStore = new store_1.MemoryStore({
                 dbPath: env_1.env.memoryDbPath,
                 dedupThreshold: env_1.env.memoryDedupThreshold,
-                maxCharsPerChunk: env_1.env.memoryMaxCharsPerChunk
+                dedupKey: env_1.env.memoryDedupKey,
+                maxCharsPerChunk: env_1.env.memoryMaxCharsPerChunk,
+                embedModelVersion: env_1.env.memoryEmbedModelVersion,
+                allowModelMismatch: env_1.env.useFakeEmbeddings
             });
             await memoryStore.load();
             console.log("[memory] store loaded", {

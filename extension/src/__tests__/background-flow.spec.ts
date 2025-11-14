@@ -63,7 +63,7 @@ describe("background pipeline", () => {
     const analyzeResponse = {
       id: "item-1",
       summary: "Mock summary",
-      is_ad: false
+      isAd: false
     };
 
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));

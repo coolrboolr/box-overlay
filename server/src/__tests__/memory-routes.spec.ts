@@ -66,7 +66,10 @@ async function createStore(): Promise<MemoryStore> {
   const store = new MemoryStore({
     dbPath: path.join(dir, "store.json"),
     dedupThreshold: 0.9,
+    dedupKey: "cosine",
     maxCharsPerChunk: 256,
+    embedModelVersion: "test-model@1",
+    allowModelMismatch: true,
     embed: fakeEmbed
   });
   await store.load();
@@ -81,7 +84,7 @@ function buildPayload(id: string, url: string): MemoryIndexItem {
     url,
     title: "Example",
     capturedAt: new Date().toISOString(),
-    contentType: "article",
+    contentType: "text/html",
     language: "en"
   };
 }

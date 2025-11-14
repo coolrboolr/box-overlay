@@ -51,7 +51,7 @@ These tools are dev-only (`isDev` builds). They never run in production bundles.
    ```
    A healthy response looks like:
    ```json
-   {"id":"smoke-1","summary":"...","image_tag":"...","is_ad":false}
+   {"id":"smoke-1","summary":"...","image":{"kind":"tag","tag":"..."},"isAd":false}
    ```
 4. For ad-hoc health checks, hit `GET /health` or `GET /api/tags` to make sure the service is bound and responding.
 
@@ -130,6 +130,8 @@ These tools are dev-only (`isDev` builds). They never run in production bundles.
 3. Use the filter pills:
    - **This domain** limits results to the active tab’s hostname.
    - **Past 7 days** restricts by capture timestamp.
+   - **Entity filter** cycles through Article/Product/Person/Brand/Unknown to scope the ontology type.
+   - **Concept filter** prompts for a concept identifier (e.g., `concept:product`) and only shows hits tagged with that ID.
 4. Results show title, snippet, similarity, and actions to open the source or copy the snippet. When
    `ENABLE_MEMORY_ANSWERS=true` on the server, an “Answer” card appears summarizing the top matches.
 5. Background devtools should log `/api/memory/query` calls; the popup console logs incoming

@@ -8,6 +8,8 @@ const node_crypto_1 = __importDefault(require("node:crypto"));
 const promises_1 = __importDefault(require("node:fs/promises"));
 const node_path_1 = __importDefault(require("node:path"));
 const schema_1 = require("../schema");
+const schema_2 = require("../schema");
+const _2025_11_ontology_1 = require("../migrations/2025-11-ontology");
 const embedding_1 = require("../services/embedding");
 class MemoryStore {
     constructor(options) {
@@ -16,9 +18,13 @@ class MemoryStore {
         this.records = [];
         this.vectorLength = null;
         this.lastFileSizeBytes = 0;
+        this.compactions = 0;
         this.dbPath = options.dbPath;
         this.dedupThreshold = options.dedupThreshold;
+        this.dedupKey = options.dedupKey;
         this.maxCharsPerChunk = options.maxCharsPerChunk;
+        this.embedModelVersion = options.embedModelVersion;
+        this.allowModelMismatch = Boolean(options.allowModelMismatch);
         this.embedText = options.embed ?? embedding_1.generateEmbedding;
     }
     async load() {
@@ -36,13 +42,13 @@ class MemoryStore {
             let failed = 0;
             for (const item of items) {
                 try {
-                    const stored = await this.processItem(item);
-                    if (stored.length > 0) {
+                    const processed = await this.processItem(item);
+                    if (processed.stored.length > 0) {
                         indexed += 1;
                         results.push(schema_1.MemoryIndexResultSchema.parse({
                             id: item.id,
                             status: "indexed",
-                            storedIds: stored.map((record) => record.id)
+                            storedIds: processed.stored.map((record) => record.id)
                         }));
                     }
                     else {
@@ -50,7 +56,8 @@ class MemoryStore {
                         results.push(schema_1.MemoryIndexResultSchema.parse({
                             id: item.id,
                             status: "duplicate",
-                            message: "No unique chunks"
+                            message: processed.reason ?? "No unique chunks",
+                            duplicateOf: processed.duplicateOf
                         }));
                     }
                 }
@@ -80,22 +87,33 @@ class MemoryStore {
             items: this.records.length,
             vectors: this.records.length,
             fileSizeBytes: this.lastFileSizeBytes,
-            lastPersistedAt: this.lastPersistedAt
+            lastPersistedAt: this.lastPersistedAt,
+            embedModelVersion: this.embedModelVersion,
+            embedDimensions: this.vectorLength ?? 0,
+            compactions: this.compactions
         };
     }
     async search(options) {
         await this.load();
-        const { vector, topK, domain, since, until } = options;
+        const { vector, topK, domain, domains, since, until, entityTypes, conceptIds } = options;
         const sinceDate = since ? Date.parse(since) : null;
         const untilDate = until ? Date.parse(until) : null;
-        const domainHost = domain ? safeHostname(domain) : null;
+        const domainHosts = buildDomainSet([domain, ...(domains ?? [])].filter(Boolean));
+        const conceptFilter = conceptIds ? new Set(conceptIds) : null;
+        const entityFilter = entityTypes ? new Set(entityTypes) : null;
         const scored = this.records
             .filter((record) => {
-            if (domainHost && record.url) {
-                const recordHost = safeHostname(record.url);
-                if (recordHost !== domainHost) {
+            if (domainHosts.size > 0) {
+                const recordHost = record.sourceDomain ?? (record.url ? safeHostname(record.url) : null);
+                if (!recordHost || !domainHosts.has(recordHost)) {
                     return false;
                 }
+            }
+            if (entityFilter && !entityFilter.has(record.entityType)) {
+                return false;
+            }
+            if (conceptFilter && !record.conceptIds.some((id) => conceptFilter.has(id))) {
+                return false;
             }
             if (sinceDate && record.capturedAt && Date.parse(record.capturedAt) < sinceDate) {
                 return false;
@@ -121,8 +139,65 @@ class MemoryStore {
             capturedAt: record.capturedAt,
             contentType: record.contentType,
             language: record.language,
-            similarity
+            entityType: record.entityType,
+            conceptIds: record.conceptIds,
+            relations: record.relations,
+            tags: record.tags,
+            sourceDomain: record.sourceDomain ?? undefined,
+            similarity,
+            duplicateOf: record.duplicateOf
         }));
+    }
+    async mutateItem(recordId, mutation) {
+        await this.load();
+        return this.enqueue(async () => {
+            const target = this.records.find((record) => record.id === recordId);
+            if (!target) {
+                return null;
+            }
+            const siblings = this.records.filter((record) => record.parentId === target.parentId);
+            for (const record of siblings) {
+                if (mutation.entityType) {
+                    record.entityType = mutation.entityType;
+                }
+                if (mutation.relations) {
+                    record.relations = mutation.relations;
+                }
+                if (mutation.conceptIds) {
+                    record.conceptIds = Array.from(new Set(mutation.conceptIds));
+                }
+                if (mutation.tags) {
+                    record.tags = Array.from(new Set(mutation.tags));
+                }
+            }
+            await this.persist();
+            const refreshed = siblings.find((record) => record.id === recordId) ?? target;
+            return schema_1.MemoryQueryHitSchema.parse({
+                id: refreshed.id,
+                parentId: refreshed.parentId,
+                sourceId: refreshed.sourceId,
+                url: refreshed.url,
+                title: refreshed.title,
+                snippet: refreshed.snippet,
+                capturedAt: refreshed.capturedAt,
+                contentType: refreshed.contentType,
+                language: refreshed.language,
+                entityType: refreshed.entityType,
+                conceptIds: refreshed.conceptIds,
+                relations: refreshed.relations,
+                tags: refreshed.tags,
+                sourceDomain: refreshed.sourceDomain ?? undefined,
+                similarity: 1
+            });
+        });
+    }
+    async compact() {
+        await this.load();
+        return this.enqueue(async () => {
+            this.records = this.records.filter((record) => !record.duplicateOf);
+            this.compactions += 1;
+            await this.persist();
+        });
     }
     async initializeFromDisk() {
         await promises_1.default.mkdir(node_path_1.default.dirname(this.dbPath), { recursive: true });
@@ -135,7 +210,20 @@ class MemoryStore {
                 this.vectorLength = null;
                 this.lastPersistedAt = undefined;
                 this.lastFileSizeBytes = 0;
+                this.compactions = 0;
                 return;
+            }
+            if (!parsed.embedModelVersion) {
+                const migrated = (0, _2025_11_ontology_1.migrateLegacyMemoryFile)(parsed, {
+                    embedModelVersion: this.embedModelVersion,
+                    dedupKey: this.dedupKey
+                });
+                await promises_1.default.writeFile(this.dbPath, JSON.stringify(migrated), "utf8");
+                return this.initializeFromDisk();
+            }
+            if (parsed.embedModelVersion !== this.embedModelVersion &&
+                !this.allowModelMismatch) {
+                throw new Error(`Embedding model mismatch: store=${parsed.embedModelVersion}, runtime=${this.embedModelVersion}`);
             }
             this.vectorLength = parsed.vectorLength || null;
             this.records = parsed.items.map((item) => ({
@@ -143,6 +231,7 @@ class MemoryStore {
                 vector: Float32Array.from(item.vector)
             }));
             this.lastPersistedAt = parsed.updatedAt;
+            this.compactions = parsed.compactions ?? 0;
             const stats = await promises_1.default.stat(this.dbPath);
             this.lastFileSizeBytes = stats.size;
         }
@@ -151,6 +240,7 @@ class MemoryStore {
                 this.records = [];
                 this.vectorLength = null;
                 this.lastFileSizeBytes = 0;
+                this.compactions = 0;
                 return;
             }
             throw error;
@@ -159,31 +249,55 @@ class MemoryStore {
     async processItem(item) {
         const textChunks = chunkText(item.text, this.maxCharsPerChunk);
         const stored = [];
+        let duplicateOf;
+        const parentId = item.parentId ?? item.id;
+        const sourceDomain = item.sourceDomain ?? (item.url ? safeHostname(item.url) : null);
+        const entityMeta = (0, schema_2.normalizeEntity)({ url: item.url, title: item.title, text: item.text });
         for (const chunk of textChunks) {
             const vector = await this.embedText(chunk);
             this.ensureVectorDimension(vector.length);
-            if (this.isDuplicate(vector, item.sourceId)) {
+            const entityType = item.entityType ?? entityMeta.entityType;
+            const conceptIds = item.conceptIds ?? entityMeta.conceptIds;
+            const contentHash = computeContentHash(chunk, item.url, entityType);
+            const duplicateRecord = this.findDuplicate({
+                vector,
+                sourceId: item.sourceId,
+                url: item.url,
+                contentHash
+            });
+            if (duplicateRecord) {
+                duplicateOf = duplicateRecord.parentId ?? duplicateRecord.id;
                 continue;
             }
             const record = {
                 id: node_crypto_1.default.randomUUID(),
-                parentId: item.id,
+                parentId,
                 sourceId: item.sourceId,
                 text: chunk,
                 snippet: createSnippet(chunk),
                 vector,
+                contentHash,
                 url: item.url,
+                sourceDomain,
                 title: item.title,
                 contentType: item.contentType,
                 capturedAt: item.capturedAt,
                 language: item.language,
-                imageTag: item.imageTag,
-                createdAt: new Date().toISOString()
+                entityType,
+                conceptIds,
+                relations: item.relations ?? [],
+                tags: item.tags ?? [],
+                image: item.image,
+                createdAt: new Date().toISOString(),
+                embedModelVersion: this.embedModelVersion,
+                embedDimensions: vector.length
             };
             this.records.push(record);
             stored.push(record);
         }
-        return stored;
+        return stored.length > 0
+            ? { stored }
+            : { stored, duplicateOf, reason: duplicateOf ? "duplicate" : "No novel chunks" };
     }
     ensureVectorDimension(length) {
         if (this.vectorLength === null) {
@@ -194,23 +308,42 @@ class MemoryStore {
             throw new Error(`Embedding dimension mismatch: expected ${this.vectorLength}, received ${length}`);
         }
     }
-    isDuplicate(vector, sourceId) {
-        for (const record of this.records) {
-            if (sourceId && record.sourceId && record.sourceId === sourceId) {
-                return true;
-            }
-            const similarity = (0, embedding_1.cosineSimilarity)(vector, record.vector);
-            if (similarity >= this.dedupThreshold) {
-                return true;
+    findDuplicate(options) {
+        const normalizedUrl = options.url ? canonicalUrl(options.url) : undefined;
+        if (this.dedupKey === "hash") {
+            const byHash = this.records.find((record) => record.contentHash === options.contentHash);
+            if (byHash) {
+                return byHash;
             }
         }
-        return false;
+        if (this.dedupKey === "url" && normalizedUrl) {
+            const byUrl = this.records.find((record) => canonicalUrl(record.url ?? "") === normalizedUrl);
+            if (byUrl) {
+                return byUrl;
+            }
+        }
+        if (options.sourceId) {
+            const bySource = this.records.find((record) => record.sourceId === options.sourceId);
+            if (bySource) {
+                return bySource;
+            }
+        }
+        for (const record of this.records) {
+            const similarity = (0, embedding_1.cosineSimilarity)(options.vector, record.vector);
+            if (similarity >= this.dedupThreshold) {
+                return record;
+            }
+        }
+        return null;
     }
     async persist() {
         const payload = {
             schemaVersion: schema_1.MEMORY_SCHEMA_VERSION,
             updatedAt: new Date().toISOString(),
             vectorLength: this.vectorLength ?? 0,
+            embedModelVersion: this.embedModelVersion,
+            dedupKey: this.dedupKey,
+            compactions: this.compactions,
             items: this.records.map((record) => ({
                 ...record,
                 vector: Array.from(record.vector)
@@ -297,5 +430,38 @@ function safeHostname(input) {
     catch {
         return null;
     }
+}
+function canonicalUrl(input) {
+    if (!input) {
+        return undefined;
+    }
+    try {
+        const url = new URL(input);
+        url.hash = "";
+        url.search = "";
+        return url.toString();
+    }
+    catch {
+        return undefined;
+    }
+}
+function computeContentHash(text, url, entityType) {
+    const hash = node_crypto_1.default.createHash("sha256");
+    hash.update(text.trim());
+    hash.update("::");
+    hash.update(url ?? "");
+    hash.update("::");
+    hash.update(entityType ?? "");
+    return hash.digest("hex");
+}
+function buildDomainSet(domains) {
+    const set = new Set();
+    domains.forEach((value) => {
+        const host = safeHostname(value);
+        if (host) {
+            set.add(host);
+        }
+    });
+    return set;
 }
 //# sourceMappingURL=store.js.map

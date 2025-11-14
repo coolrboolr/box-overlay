@@ -119,16 +119,18 @@ function applyCardState(card: HTMLElement, record: ReturnType<typeof getOverlay>
   metaEl.hidden = false;
   statusEl.textContent = "";
 
-  const isOrganic = !data.is_ad && Boolean(data.image_tag);
-  const isUncategorized = !data.is_ad && !data.image_tag;
+  const isAd = data.isAd;
+  const imageTag = data.image?.kind === "tag" ? data.image.tag : undefined;
+  const isOrganic = !isAd && Boolean(imageTag);
+  const isUncategorized = !isAd && !imageTag;
 
   summaryEl.textContent = data.summary;
 
-  card.classList.toggle("llm-overlay-card--ad", data.is_ad);
+  card.classList.toggle("llm-overlay-card--ad", isAd);
   card.classList.toggle("llm-overlay-card--organic", isOrganic);
   card.classList.toggle("llm-overlay-card--uncategorized", isUncategorized);
 
-  const tagText = data.image_tag ?? (isUncategorized ? DEFAULT_TAG_LABEL : "");
+  const tagText = imageTag ?? (isUncategorized ? DEFAULT_TAG_LABEL : "");
   let tagEl = metaEl.querySelector<HTMLElement>(".llm-overlay-tag");
   if (tagText) {
     if (!tagEl) {
@@ -142,7 +144,7 @@ function applyCardState(card: HTMLElement, record: ReturnType<typeof getOverlay>
   }
 
   let badgeEl = metaEl.querySelector<HTMLElement>(".llm-overlay-badge");
-  if (data.is_ad) {
+  if (isAd) {
     if (!badgeEl) {
       badgeEl = document.createElement("span");
       badgeEl.className = "llm-overlay-badge";

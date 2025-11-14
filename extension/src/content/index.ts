@@ -150,10 +150,12 @@ function hasPayloadChanged(
   if (!previous) {
     return true;
   }
+  const prevTag = previous.image?.kind === "tag" ? previous.image.tag : "";
+  const nextTag = next.image?.kind === "tag" ? next.image.tag : "";
   return (
     previous.summary !== next.summary ||
-    previous.image_tag !== next.image_tag ||
-    previous.is_ad !== next.is_ad
+    prevTag !== nextTag ||
+    previous.isAd !== next.isAd
   );
 }
 
@@ -251,7 +253,7 @@ function handleAnalyzeError(payload: AnalyzeError): void {
   const fallback: ItemAnalysisResponse = existing ?? {
     id: payload.id,
     summary: formatErrorMessage(payload),
-    is_ad: false
+    isAd: false
   };
 
   const request = getLastRequestPayload(payload.id);
@@ -402,7 +404,7 @@ function ensurePendingOverlay(item: ItemAnalysisRequest): void {
     {
       id: item.id,
       summary: PENDING_SUMMARY,
-      is_ad: false
+      isAd: false
     },
     { status: "pending" }
   );

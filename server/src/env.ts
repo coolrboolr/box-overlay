@@ -66,13 +66,25 @@ const EnvSchema = z.object({
     .optional()
     .default(".cache/memory-store.json"),
   MEMORY_EMBED_MODEL: z.string().default("mxbai-embed-large"),
+  MEMORY_EMBED_MODEL_VERSION: z.string().optional(),
   MEMORY_DEDUP_THRESHOLD: z.coerce.number().min(0).max(1).default(0.9),
+  MEMORY_DEDUP_KEY: z.enum(["hash", "url", "cosine"]).default("cosine"),
   MEMORY_MAX_CHARS_PER_CHUNK: z.coerce.number().int().positive().default(1000),
   USE_FAKE_EMBEDDINGS: z
     .string()
     .optional()
     .transform((value) => value === "true"),
   ENABLE_MEMORY_ANSWERS: z
+    .string()
+    .optional()
+    .transform((value) => {
+      if (value === undefined) {
+        return false;
+      }
+      const normalized = value.trim().toLowerCase();
+      return normalized === "1" || normalized === "true";
+    }),
+  ENABLE_MEMORY_ADMIN: z
     .string()
     .optional()
     .transform((value) => {
@@ -128,8 +140,11 @@ export const env = {
   memoryEnabled: parsed.MEMORY_ENABLED,
   memoryDbPath: resolvePathFromRepo(parsed.MEMORY_DB_PATH) ?? path.resolve(repoRoot, ".cache/memory-store.json"),
   memoryEmbedModel: parsed.MEMORY_EMBED_MODEL,
+  memoryEmbedModelVersion: parsed.MEMORY_EMBED_MODEL_VERSION ?? parsed.MEMORY_EMBED_MODEL,
   memoryDedupThreshold: parsed.MEMORY_DEDUP_THRESHOLD,
+  memoryDedupKey: parsed.MEMORY_DEDUP_KEY,
   memoryMaxCharsPerChunk: parsed.MEMORY_MAX_CHARS_PER_CHUNK,
   useFakeEmbeddings: parsed.USE_FAKE_EMBEDDINGS,
-  enableMemoryAnswers: parsed.ENABLE_MEMORY_ANSWERS
+  enableMemoryAnswers: parsed.ENABLE_MEMORY_ANSWERS,
+  enableMemoryAdmin: parsed.ENABLE_MEMORY_ADMIN
 };

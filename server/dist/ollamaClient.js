@@ -91,16 +91,15 @@ function extractImageData(image) {
     if (!image) {
         return undefined;
     }
-    if (image.startsWith("data:")) {
-        const commaIndex = image.indexOf(",");
+    if (image.kind === "dataUri") {
+        const commaIndex = image.data.indexOf(",");
         if (commaIndex >= 0) {
-            return image.slice(commaIndex + 1);
+            return image.data.slice(commaIndex + 1);
         }
-        return image;
+        return image.data;
     }
-    // If the extension ever passes raw base64 or URLs, only forward when base64 is detected.
-    if (/^[a-z0-9+/=]+$/i.test(image)) {
-        return image;
+    if (image.kind === "tag") {
+        return undefined;
     }
     return undefined;
 }
@@ -125,16 +124,20 @@ function normalizeResponse(raw, input) {
     }
     const record = raw;
     const summary = typeof record.summary === "string" ? record.summary.trim() : "";
-    const imageTagRaw = typeof record.image_tag === "string" ? record.image_tag.trim() : undefined;
-    const isAdRaw = record.is_ad;
+    const imageTagRaw = typeof record.image_tag === "string"
+        ? record.image_tag.trim()
+        : typeof record.imageTag === "string"
+            ? record.imageTag.trim()
+            : undefined;
+    const isAdRaw = record.is_ad ?? record.isAd;
     const normalizedSummary = truncate(summary, 280);
     const normalizedImageTag = imageTagRaw ? limitWords(imageTagRaw, 3) : undefined;
     const normalizedIsAd = coerceBoolean(isAdRaw);
     return {
         id: input.id,
         summary: normalizedSummary || defaultSummary(input.text),
-        image_tag: normalizedImageTag,
-        is_ad: normalizedIsAd
+        image: normalizedImageTag ? { kind: "tag", tag: normalizedImageTag } : undefined,
+        isAd: normalizedIsAd
     };
 }
 function truncate(text, maxLength) {
@@ -176,8 +179,8 @@ function mockResponse(input) {
     return {
         id: input.id,
         summary: truncate(input.text.replace(/\s+/g, " ").trim(), 200),
-        image_tag: input.image ? "generic image" : undefined,
-        is_ad: false
+        image: input.image?.kind === "tag" ? { kind: "tag", tag: input.image.tag } : undefined,
+        isAd: false
     };
 }
 //# sourceMappingURL=ollamaClient.js.map

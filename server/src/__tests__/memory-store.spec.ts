@@ -23,7 +23,10 @@ describe("MemoryStore", () => {
     const store = new MemoryStore({
       dbPath,
       dedupThreshold: 0.9,
+      dedupKey: "cosine",
       maxCharsPerChunk: 64,
+      embedModelVersion: "test-model@1",
+      allowModelMismatch: true,
       embed: fakeEmbed
     });
 
@@ -58,7 +61,10 @@ describe("MemoryStore", () => {
     const reloaded = new MemoryStore({
       dbPath,
       dedupThreshold: 0.9,
+      dedupKey: "cosine",
       maxCharsPerChunk: 64,
+      embedModelVersion: "test-model@1",
+      allowModelMismatch: true,
       embed: fakeEmbed
     });
     await reloaded.load();
@@ -82,7 +88,10 @@ describe("MemoryStore", () => {
     const store = new MemoryStore({
       dbPath,
       dedupThreshold: 0.8,
+      dedupKey: "cosine",
       maxCharsPerChunk: 256,
+      embedModelVersion: "test-model@1",
+      allowModelMismatch: true,
       embed: orthogonalEmbed
     });
 
@@ -107,6 +116,119 @@ describe("MemoryStore", () => {
 
     const stats = await store.stats();
     expect(stats.items).toBe(2);
+  });
+
+  it("marks duplicates using hash strategy", async () => {
+    const dbPath = await createTempPath();
+    const store = new MemoryStore({
+      dbPath,
+      dedupThreshold: 0.9,
+      dedupKey: "hash",
+      maxCharsPerChunk: 256,
+      embedModelVersion: "test-model@1",
+      allowModelMismatch: true,
+      embed: fakeEmbed
+    });
+    await store.load();
+
+    const payload: MemoryIndexItem = {
+      id: "hash-a",
+      text: "Identical hash content",
+      sourceId: "hash-a",
+      url: "https://example.dev/a"
+    };
+
+    const first = await store.ingest([payload]);
+    expect(first.counts.indexed).toBe(1);
+
+    const second = await store.ingest([{ ...payload, id: "hash-b", sourceId: "hash-b" }]);
+    expect(second.counts.duplicate).toBe(1);
+    expect(second.results[0]?.duplicateOf).toBeDefined();
+  });
+
+  it("filters search results by entity type and concepts", async () => {
+    const dbPath = await createTempPath();
+    const store = new MemoryStore({
+      dbPath,
+      dedupThreshold: 0.5,
+      dedupKey: "cosine",
+      maxCharsPerChunk: 256,
+      embedModelVersion: "test-model@1",
+      allowModelMismatch: true,
+      embed: fakeEmbed
+    });
+    await store.load();
+
+    await store.ingest([
+      {
+        id: "concept-a",
+        text: "Product guide snippet",
+        entityType: "product",
+        conceptIds: ["concept:product"],
+        url: "https://example.dev/product"
+      },
+      {
+        id: "concept-b",
+        text: "Article snippet body",
+        entityType: "article",
+        conceptIds: ["concept:article"],
+        url: "https://example.dev/article"
+      }
+    ]);
+
+    const vector = await fakeEmbed("Product guide snippet");
+    const results = await store.search({
+      vector,
+      topK: 2,
+      entityTypes: ["product"],
+      conceptIds: ["concept:product"]
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0]?.entityType).toBe("product");
+  });
+
+  it("migrates legacy persistence payloads that lack embed metadata", async () => {
+    const dbPath = await createTempPath();
+    const legacy = {
+      schemaVersion: 1,
+      updatedAt: new Date().toISOString(),
+      vectorLength: 2,
+      items: [
+        {
+          id: "legacy",
+          parentId: "legacy",
+          sourceId: "legacy",
+          text: "Legacy chunk",
+          snippet: "Legacy chunk",
+          vector: [1, 0],
+          url: "https://legacy.dev/path",
+          title: "Legacy",
+          contentType: "text/html",
+          createdAt: new Date().toISOString()
+        }
+      ]
+    };
+    await fs.writeFile(dbPath, JSON.stringify(legacy));
+
+    const store = new MemoryStore({
+      dbPath,
+      dedupThreshold: 0.9,
+      dedupKey: "cosine",
+      maxCharsPerChunk: 256,
+      embedModelVersion: "test-model@1",
+      allowModelMismatch: true,
+      embed: fakeEmbed
+    });
+    await store.load();
+
+    const stats = await store.stats();
+    expect(stats.embedModelVersion).toBe("test-model@1");
+
+    const hits = await store.search({
+      vector: new Float32Array([1, 0]),
+      topK: 1
+    });
+    expect(hits[0]?.sourceDomain).toBe("legacy.dev");
   });
 });
 

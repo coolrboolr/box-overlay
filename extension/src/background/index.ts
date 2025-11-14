@@ -5,6 +5,7 @@ import type {
   DevTelemetryEventName,
   ItemAnalysisRequest,
   ItemAnalysisResponse,
+  ImageRef,
   MemoryIndexItem,
   MemoryIndexRequest,
   MemoryIndexResponse,
@@ -692,8 +693,8 @@ function normalizeAnalysisResponse(data: unknown): ItemAnalysisResponse {
   const record = data as Record<string, unknown>;
   const id = record.id;
   const summary = record.summary;
-  const isAd = record.is_ad;
-  const imageTag = record.image_tag;
+  const isAd = typeof record.isAd === "boolean" ? record.isAd : record.is_ad;
+  const rawImage = record.image ?? record.image_tag;
 
   if (typeof id !== "string") {
     throw new BackendRequestError("Backend response missing id", {
@@ -706,21 +707,18 @@ function normalizeAnalysisResponse(data: unknown): ItemAnalysisResponse {
     });
   }
   if (typeof isAd !== "boolean") {
-    throw new BackendRequestError("Backend response missing is_ad flag", {
+    throw new BackendRequestError("Backend response missing isAd flag", {
       retryable: false
     });
   }
 
-  let normalizedImageTag: string | undefined;
-  if (typeof imageTag === "string" && imageTag.length > 0) {
-    normalizedImageTag = imageTag;
-  }
+  const image = normalizeImageRef(rawImage);
 
   return {
     id,
     summary,
-    image_tag: normalizedImageTag,
-    is_ad: isAd
+    image,
+    isAd
   };
 }
 
@@ -760,8 +758,8 @@ function normalizeBatchEntry(entry: unknown): BatchAnalysisResult {
     });
   }
   const record = entry as Record<string, unknown>;
-  const id = record.id;
-  if (typeof id !== "string" || id.length === 0) {
+  const id = typeof record.id === "string" ? record.id : undefined;
+  if (!id) {
     throw new BackendRequestError("Batch entry missing id", {
       retryable: false
     });
@@ -769,7 +767,7 @@ function normalizeBatchEntry(entry: unknown): BatchAnalysisResult {
 
   if ("result" in record && record.result) {
     const normalized = normalizeAnalysisResponse(record.result);
-    return { id, result: normalized };
+    return { kind: "ok", id, result: normalized };
   }
 
   if (typeof record.error === "object" && record.error !== null) {
@@ -783,6 +781,7 @@ function normalizeBatchEntry(entry: unknown): BatchAnalysisResult {
       typeof errorRecord.details === "string" ? errorRecord.details : undefined;
 
     return {
+      kind: "err",
       id,
       error: {
         id,
@@ -797,6 +796,31 @@ function normalizeBatchEntry(entry: unknown): BatchAnalysisResult {
   throw new BackendRequestError("Batch entry missing result/error payload", {
     retryable: false
   });
+}
+
+function normalizeImageRef(raw: unknown): ImageRef | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  if (typeof raw === "object" && raw !== null) {
+    const candidate = raw as Partial<ImageRef>;
+    if (candidate.kind === "tag" && typeof candidate.tag === "string") {
+      return { kind: "tag", tag: candidate.tag };
+    }
+    if (candidate.kind === "url" && typeof candidate.url === "string") {
+      return { kind: "url", url: candidate.url };
+    }
+    if (candidate.kind === "dataUri" && typeof (candidate as { data?: unknown }).data === "string") {
+      return { kind: "dataUri", data: candidate.data! };
+    }
+  }
+  if (typeof raw === "string") {
+    if (raw.startsWith("data:")) {
+      return { kind: "dataUri", data: raw };
+    }
+    return { kind: "tag", tag: raw };
+  }
+  return undefined;
 }
 
 async function sendMemoryIndexRequest(

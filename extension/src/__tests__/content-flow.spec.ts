@@ -112,7 +112,7 @@ describe("content pipeline", () => {
       payload: {
         id,
         summary: "Headline summary",
-        is_ad: false
+        isAd: false
       }
     });
 
@@ -134,7 +134,7 @@ describe("content pipeline", () => {
       payload: {
         id,
         summary: "Another summary",
-        is_ad: false
+        isAd: false
       }
     });
 
@@ -184,7 +184,7 @@ describe("content pipeline", () => {
       payload: {
         id,
         summary: "Stale summary",
-        is_ad: false
+        isAd: false
       }
     });
 
@@ -208,7 +208,7 @@ describe("content pipeline", () => {
       payload: {
         id,
         summary: "Initial summary",
-        is_ad: false
+        isAd: false
       }
     });
 
@@ -221,7 +221,7 @@ describe("content pipeline", () => {
         payload: {
           id,
           summary: `Update ${attempt}`,
-          is_ad: false
+          isAd: false
         }
       });
       await Promise.resolve();

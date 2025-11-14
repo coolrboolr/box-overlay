@@ -1,6 +1,11 @@
 export const SCHEMA_VERSION = 1 as const;
 export const MEMORY_SCHEMA_VERSION = 1 as const;
 
+export type ImageRef =
+  | { kind: "tag"; tag: string }
+  | { kind: "dataUri"; data: string }
+  | { kind: "url"; url: string };
+
 export interface ItemSourceMeta {
   profileName?: string;
   anchorTag?: string;
@@ -11,15 +16,15 @@ export interface ItemAnalysisRequest {
   schemaVersion: typeof SCHEMA_VERSION;
   id: string;
   text: string;
-  image?: string;
+  image?: ImageRef;
   sourceMeta?: ItemSourceMeta;
 }
 
 export interface ItemAnalysisResponse {
   id: string;
   summary: string;
-  image_tag?: string;
-  is_ad: boolean;
+  image?: ImageRef;
+  isAd: boolean;
 }
 
 export interface AnalyzeError {
@@ -43,8 +48,8 @@ export interface BatchAnalysisRequest {
 }
 
 export type BatchAnalysisResult =
-  | { id: string; result: ItemAnalysisResponse }
-  | { id: string; error: AnalyzeError };
+  | { kind: "ok"; id: string; result: ItemAnalysisResponse }
+  | { kind: "err"; id: string; error: AnalyzeError };
 
 export interface BatchAnalysisResponse {
   schemaVersion: typeof SCHEMA_VERSION;
@@ -53,6 +58,7 @@ export interface BatchAnalysisResponse {
 
 export interface MemoryIndexItem {
   id: string;
+  parentId?: string;
   sourceId?: string;
   text: string;
   url?: string;
@@ -60,8 +66,11 @@ export interface MemoryIndexItem {
   contentType?: string;
   capturedAt?: string;
   language?: string;
-  imageTag?: string;
-  imageData?: string;
+  image?: ImageRef;
+  entityType?: string;
+  conceptIds?: string[];
+  relations?: Array<{ type: string; targetId: string }>;
+  tags?: string[];
 }
 
 export interface MemoryIndexRequest {
@@ -75,6 +84,7 @@ export interface MemoryIndexResult {
   status: "indexed" | "duplicate" | "failed";
   message?: string;
   storedIds?: string[];
+  duplicateOf?: string;
 }
 
 export interface MemoryIndexResponse {
@@ -89,8 +99,12 @@ export interface MemoryIndexResponse {
 
 export interface MemoryQueryFilters {
   domain?: string;
+  domains?: string[];
   since?: string;
   until?: string;
+  limit?: number;
+  entityTypes?: string[];
+  conceptIds?: string[];
 }
 
 export interface MemoryQueryRequestMessage {
@@ -109,6 +123,11 @@ export interface MemoryQueryHit {
   capturedAt?: string;
   contentType?: string;
   language?: string;
+  entityType?: string;
+  conceptIds?: string[];
+  relations?: Array<{ type: string; targetId: string }>;
+  tags?: string[];
+  sourceDomain?: string;
   similarity: number;
 }
 
@@ -118,6 +137,7 @@ export interface MemoryQueryResponseMessage {
   answer?: {
     text: string;
     sources: string[];
+    sourceIds?: string[];
   };
 }
 
