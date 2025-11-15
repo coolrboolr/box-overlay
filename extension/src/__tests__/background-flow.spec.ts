@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { SCHEMA_VERSION } from "../types/messages";
+import { MEMORY_SCHEMA_VERSION, SCHEMA_VERSION } from "../types/messages";
 
 function createChromeBackgroundMock() {
   const runtimeOnMessageAddListener = vi.fn();
@@ -152,7 +152,7 @@ describe("background pipeline", () => {
     vi.useFakeTimers();
 
     const memoryResponse = {
-      schemaVersion: 1,
+      schemaVersion: MEMORY_SCHEMA_VERSION,
       counts: { indexed: 1, duplicate: 0, failed: 0 },
       results: [{ id: "mem-1", status: "indexed" }]
     };
@@ -174,7 +174,7 @@ describe("background pipeline", () => {
         schemaVersion: SCHEMA_VERSION,
         type: "MEMORY_INDEX_REQUEST",
         payload: {
-          schemaVersion: 1,
+          schemaVersion: MEMORY_SCHEMA_VERSION,
           items: [{ id: "mem-1", text: "Example text" }],
           flush: true
         }
@@ -217,7 +217,7 @@ describe("background pipeline", () => {
       {
         schemaVersion: SCHEMA_VERSION,
         type: "MEMORY_INDEX_REQUEST",
-        payload: { schemaVersion: 1, items: payloadItems }
+        payload: { schemaVersion: MEMORY_SCHEMA_VERSION, items: payloadItems }
       },
       { tab: { id: 42 } } as chrome.runtime.MessageSender,
       sendResponse

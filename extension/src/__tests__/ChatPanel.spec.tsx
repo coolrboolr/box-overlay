@@ -1,6 +1,5 @@
 /* @vitest-environment jsdom */
-import "@testing-library/jest-dom";
-import { describe, expect, it, beforeEach, vi } from "vitest";
+import { afterEach, describe, expect, it, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ChatPanel from "../components/chat/ChatPanel";
@@ -85,11 +84,15 @@ describe("ChatPanel", () => {
     closeChatPanel.mockClear();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("focuses first focusable and defaults to pinned chat when open", async () => {
     const launcher = document.createElement("button");
     const { container } = render(<ChatPanel launcherRef={{ current: launcher }} />);
-    const searchInput = screen.getByRole("searchbox", { name: /search chats/i });
-    await waitFor(() => expect(searchInput).toHaveFocus());
+    const closeButton = screen.getByRole("button", { name: /close chat panel/i });
+    await waitFor(() => expect(closeButton).toHaveFocus());
     const pinnedRow = container.querySelector('button.llm-chat-list__row');
     expect(pinnedRow).toHaveAttribute("aria-pressed", "true");
   });
@@ -110,18 +113,19 @@ describe("ChatPanel", () => {
   });
 
   it("debounces search before invoking useChats with query", async () => {
-    vi.useFakeTimers();
+    vi.useRealTimers();
     const launcher = document.createElement("button");
     render(<ChatPanel launcherRef={{ current: launcher }} />);
     const initialCalls = useChatsMock.mock.calls.length;
     await userEvent.type(screen.getByRole("searchbox"), "alpha");
     expect(screen.getByLabelText("Search chats").parentElement?.querySelector(".llm-spinner")).toBeTruthy();
-    expect(useChatsMock.mock.calls.length).toBe(initialCalls);
-    vi.runAllTimers();
+    const immediateCall = useChatsMock.mock.calls.at(-1)?.[0];
+    expect(immediateCall?.query ?? "").toBe("");
     await waitFor(() => expect(useChatsMock.mock.calls.length).toBeGreaterThan(initialCalls));
-    const lastCall = useChatsMock.mock.calls.at(-1)?.[0];
-    expect(lastCall?.query).toBe("alpha");
-    vi.useRealTimers();
+    await waitFor(() => {
+      const lastCall = useChatsMock.mock.calls.at(-1)?.[0];
+      expect(lastCall?.query).toBe("alpha");
+    });
   });
 
   it("renders no-context, loading, error, empty, and truncated states", async () => {
