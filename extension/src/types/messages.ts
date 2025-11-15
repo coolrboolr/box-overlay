@@ -175,3 +175,5 @@ export type RuntimeMessage =
   | RuntimeMessageBase<"MEMORY_UPDATE_REQUEST", { id: string; userNote?: string; tags?: string[] }>
   | RuntimeMessageBase<"MEMORY_UPDATE_RESULT", { id: string; userNote?: string; tags?: string[] }>
   | RuntimeMessageBase<"MEMORY_UPDATE_ERROR", { id: string; message: string }>;
+
+export type { Chat, AnchorSet, AnchorEntity, AnchorRelationship } from "./chat";
