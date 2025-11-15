@@ -2,7 +2,7 @@
  * Overlay chat domain model (see SPEC21: Overlay Chat IA & UX Skeleton).
  * Types only; no runtime imports or behavior.
  */
-import type { EntityType, RelationType } from "../../../server/src/schema/ontology";
+import type { EntityType, RelationType } from "./ontology";
 
 /**
  * Anchored entity selected or inferred for a chat.

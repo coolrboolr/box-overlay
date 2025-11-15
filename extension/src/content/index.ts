@@ -32,6 +32,8 @@ import { isDev } from "../shared/isDev";
 import { exportLogs, initTelemetryStore, recordEvent } from "./logStore";
 import { mountDebugHud, unmountDebugHud } from "./debugHud";
 import { createMemoryCaptureController } from "./memoryCapture";
+import { mountChatShell } from "./chatShell";
+import { closeChatPanel } from "../state/overlayStore";
 
 const activeProfile = getActiveProfile();
 const candidateSelector = activeProfile.selectors.join(",");
@@ -64,6 +66,8 @@ if (isDev) {
   window.addEventListener("pagehide", teardownHud);
   window.addEventListener("beforeunload", teardownHud);
 }
+
+mountChatShell();
 
 function shouldIgnoreKeyEvent(event: KeyboardEvent): boolean {
   const target = event.target as HTMLElement | null;
@@ -365,6 +369,9 @@ async function handleToggleOverlays(): Promise<void> {
     const shouldShow = overlaysEnabled && !record.dismissed;
     record.container.classList.toggle("llm-overlay-hidden", !shouldShow);
   });
+  if (!overlaysEnabled) {
+    closeChatPanel();
+  }
   if (isDev) {
     debug("overlays", overlaysEnabled ? "enabled" : "disabled");
   }
