@@ -4,6 +4,11 @@ import { PopupController } from "../popup/index";
 
 function setupDom() {
   document.body.innerHTML = `
+    <div class="tabs">
+      <button id="tab-search" type="button">Search</button>
+      <button id="tab-chat" type="button">Chat</button>
+    </div>
+    <section id="search-view">
     <h1>Search Memory</h1>
     <form id="query-form">
       <input id="query-input" type="text" />
@@ -23,6 +28,18 @@ function setupDom() {
       <ul></ul>
     </section>
     <section id="results"></section>
+    </section>
+
+    <section id="chat-view" hidden>
+      <div id="chat-log"></div>
+      <form id="chat-form">
+        <input id="chat-input" type="text" />
+        <button id="chat-send" type="submit">Send</button>
+      </form>
+      <div class="filters">
+        <button id="chat-reset" type="button">Reset conversation</button>
+      </div>
+    </section>
   `;
 }
 

@@ -112,6 +112,42 @@ describe("background pipeline", () => {
     expect(analyzeUrl).toContain("/api/analyze");
   });
 
+  it("accepts ImageRef objects in ANALYZE_REQUEST", async () => {
+    const analyzeResponse = { id: "img-1", summary: "ok", isAd: false };
+
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(analyzeResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+
+    await import("../background/index");
+    const onMessageHandler = chromeMock.runtime.onMessage.addListener.mock.calls[0][0];
+
+    const handled = onMessageHandler(
+      {
+        schemaVersion: SCHEMA_VERSION,
+        type: "ANALYZE_REQUEST",
+        payload: {
+          schemaVersion: SCHEMA_VERSION,
+          id: "img-1",
+          text: "body",
+          image: { kind: "tag", tag: "news" }
+        }
+      },
+      { tab: { id: 5 } } as chrome.runtime.MessageSender,
+      vi.fn()
+    );
+
+    expect(handled).toBe(false);
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[1]?.[0]).toContain("/api/analyze");
+    });
+  });
+
   it("queues memory requests and posts to the memory endpoint", async () => {
     vi.useFakeTimers();
 
