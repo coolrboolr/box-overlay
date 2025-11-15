@@ -22,7 +22,7 @@ import {
 import { decodeWire, encodeWire } from "./wireCodec";
 
 export const SCHEMA_VERSION = 1 as const;
-export const MEMORY_SCHEMA_VERSION = 1 as const;
+export const MEMORY_SCHEMA_VERSION = 2 as const;
 
 const ANALYSIS_TEXT_LIMIT = 1_500;
 const MEMORY_TEXT_LIMIT = parsePositiveInt(process.env.LIMIT_TEXT, 4_000);
@@ -30,6 +30,7 @@ const ACCEPT_BARE_DOMAIN = parseBoolean(process.env.ACCEPT_BARE_DOMAIN, true);
 const DATA_URI_MAX_CHARS = 100 * 1024; // 100 KB upper bound
 const LANGUAGE_TAG_REGEX = /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*$/;
 const MIME_REGEX = /^[\w.+-]+\/[\w.+-]+$/;
+const TAG_REGEX = /^[A-Za-z0-9\-_/]+$/;
 const HOSTNAME_REGEX = /^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(?:\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))+$/;
 const DEFAULT_TOP_K = 5;
 const MAX_TOP_K = 20;
@@ -103,6 +104,21 @@ const RelationSchema = z
     targetId: z.string().min(1)
   })
   .strict();
+
+const TagSchema = z
+  .string()
+  .trim()
+  .min(1, { message: "tag cannot be empty" })
+  .max(20, { message: "tag must be ≤20 characters" })
+  .regex(TAG_REGEX, {
+    message: "tag must be alphanumeric and may include - _ /"
+  })
+  .transform((value) => value.toLowerCase());
+
+const UserNoteSchema = z
+  .string()
+  .trim()
+  .max(200, { message: "note must be ≤200 characters" });
 
 /** Unified image reference used across request/response payloads. */
 export const ImageRefSchema = z
@@ -277,9 +293,11 @@ export const MemoryIndexItemSchema = z
     image: OptionalImageRef,
     entityType: EntityTypeSchema.optional(),
     conceptIds: z.array(ConceptIdSchema).max(16).optional(),
-    tags: z.array(z.string().min(1)).max(16).optional(),
+    tags: z.array(TagSchema).max(10).optional(),
+    userNote: UserNoteSchema.optional(),
     relations: z.array(RelationSchema).max(32).optional(),
-    sourceDomain: HostnameOnlySchema.optional()
+    sourceDomain: HostnameOnlySchema.optional(),
+    updatedAt: z.string().datetime().optional()
   })
   .strict()
   .describe("Normalized memory chunk ready for ingestion");
@@ -351,7 +369,9 @@ export const MemoryStatsResponseSchema = z
     lastPersistedAt: z.string().datetime().optional(),
     embedModelVersion: z.string().min(1),
     embedDimensions: z.number().int().positive(),
-    compactions: z.number().int().nonnegative().default(0)
+    compactions: z.number().int().nonnegative().default(0),
+    tagCounts: z.record(z.string(), z.number().int().nonnegative()).default({}),
+    taggedItems: z.number().int().nonnegative().default(0)
   })
   .strict();
 
@@ -366,7 +386,8 @@ export const MemoryQueryFiltersSchema = z
     until: z.string().datetime().optional(),
     limit: z.number().int().min(1).max(50).optional(),
     entityTypes: z.array(EntityTypeSchema).max(8).optional(),
-    conceptIds: z.array(ConceptIdSchema).max(16).optional()
+    conceptIds: z.array(ConceptIdSchema).max(16).optional(),
+    tags: z.array(TagSchema).max(10).optional()
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -392,7 +413,20 @@ export const MemoryQueryRequestSchema = z
       .max(MAX_TOP_K)
       .default(DEFAULT_TOP_K)
       .describe("Defaults to 5 results; cap at 20 to contain payload size."),
-    filters: MemoryQueryFiltersSchema.optional()
+    filters: MemoryQueryFiltersSchema.optional(),
+    conversationId: z.string().uuid().optional(),
+    history: z
+      .array(
+        z
+          .object({
+            role: z.enum(["user", "assistant"]),
+            content: z.string().min(1),
+            sourceIds: z.array(z.string().min(1)).optional()
+          })
+          .strict()
+      )
+      .max(5)
+      .optional()
   })
   .strict();
 
@@ -412,7 +446,9 @@ export const MemoryQueryHitSchema = z
     language: LanguageTagSchema.optional(),
     entityType: EntityTypeSchema.optional(),
     conceptIds: z.array(ConceptIdSchema).optional(),
-    tags: z.array(z.string().min(1)).optional(),
+    tags: z.array(TagSchema).optional(),
+    userNote: UserNoteSchema.optional(),
+    updatedAt: z.string().datetime().optional(),
     relations: z.array(RelationSchema).optional(),
     sourceDomain: HostnameOnlySchema.optional(),
     similarity: z
@@ -446,9 +482,11 @@ export type MemoryQueryResponse = z.infer<typeof MemoryQueryResponseSchema>;
 /** PATCH payload for /api/memory/items/:id allowing ontology edits. */
 export const MemoryMutationSchema = z
   .object({
+    schemaVersion: z.literal(MEMORY_SCHEMA_VERSION).optional(),
     entityType: EntityTypeSchema.optional(),
     relations: z.array(RelationSchema).optional(),
-    tags: z.array(z.string().min(1)).max(16).optional(),
+    tags: z.array(TagSchema).max(10).optional(),
+    userNote: UserNoteSchema.optional(),
     conceptIds: z.array(ConceptIdSchema).optional()
   })
   .strict()

@@ -1,5 +1,6 @@
 import { env } from "../env";
 import type { MemoryQueryHit } from "../schema";
+import type { ConversationTurn } from "../memory/conversation";
 
 interface MemoryAnswerResponse {
   answer: string;
@@ -8,7 +9,8 @@ interface MemoryAnswerResponse {
 
 export async function generateMemoryAnswer(
   query: string,
-  hits: MemoryQueryHit[]
+  hits: MemoryQueryHit[],
+  options: { history?: ConversationTurn[] } = {}
 ): Promise<{ text: string; sources: string[]; sourceIds: string[] }> {
   if (!env.enableMemoryAnswers) {
     throw new Error("Memory answers disabled");
@@ -35,12 +37,22 @@ export async function generateMemoryAnswer(
       })
       .join("\n\n");
 
-    const prompt = `You are a local assistant that answers the user's question using the provided saved snippets. ` +
-      `Respond in JSON with keys "answer" and "sources" (an array of titles you used).`;
+    const historyContext = (options.history ?? [])
+      .map((turn, index) => `${index + 1}. ${turn.role.toUpperCase()}: ${turn.content}`)
+      .join("\n");
+
+    const historySection = historyContext
+      ? `Earlier conversation (most recent last, up to 3 turns):\n${historyContext}\n\n`
+      : "";
+
+    const prompt =
+      `You are a local assistant that answers the user's question using the provided saved snippets. ` +
+      `Respond in JSON with keys "answer" and "sources" (an array of titles you used). ` +
+      `Always cite sources and mention when you are using earlier conversation context.`;
 
     const payload = {
       model,
-      prompt: `${prompt}\n\nQuestion: ${query}\n\nSnippets:\n${context}\n\nJSON:` ,
+      prompt: `${prompt}\n\n${historySection}Question: ${query}\n\nSnippets:\n${context}\n\nJSON:`,
       format: "json",
       stream: false
     };
@@ -59,7 +71,7 @@ export async function generateMemoryAnswer(
     const json = (await response.json()) as { response?: string };
     const parsed = parseAnswer(json.response);
     return {
-      text: parsed.answer,
+      text: options.history?.length ? `Using earlier context: ${parsed.answer}` : parsed.answer,
       sources: parsed.sources?.length ? parsed.sources : hits.map((hit) => hit.title || hit.url || hit.id),
       sourceIds: hits.map((hit) => hit.id)
     };

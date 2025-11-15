@@ -1,5 +1,4 @@
 import {
-  MEMORY_SCHEMA_VERSION,
   type MemoryQueryHit,
   type MemoryQueryResponseMessage,
   type RuntimeMessage,
@@ -11,6 +10,7 @@ interface FiltersState {
   since?: string;
   entityTypes?: string[];
   conceptIds?: string[];
+  tags?: string[];
 }
 
 export class PopupController {
@@ -24,6 +24,22 @@ export class PopupController {
   private recentFilterBtn: HTMLButtonElement;
   private entityFilterBtn: HTMLButtonElement;
   private conceptFilterBtn: HTMLButtonElement;
+  private tabSearchBtn: HTMLButtonElement;
+  private tabChatBtn: HTMLButtonElement;
+  private searchView: HTMLElement;
+  private chatView: HTMLElement;
+  private chatLog: HTMLElement;
+  private chatForm: HTMLFormElement;
+  private chatInput: HTMLInputElement;
+  private chatResetBtn: HTMLButtonElement;
+  private activeTab: "search" | "chat" = "search";
+  private conversationId: string =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `conv-${Date.now()}`;
+  private chatHistory: Array<{ role: "user" | "assistant"; content: string; sourceIds?: string[] }> = [];
+  private chatPendingBubble?: HTMLElement;
+  private chatAwaiting = false;
   private activeDomain?: string;
   private filters: FiltersState = {};
   private entityOptions = ["article", "product", "person", "brand", "unknown"] as const;
@@ -40,6 +56,14 @@ export class PopupController {
     this.recentFilterBtn = this.require<HTMLButtonElement>("filter-recent");
     this.entityFilterBtn = this.require<HTMLButtonElement>("filter-entity");
     this.conceptFilterBtn = this.require<HTMLButtonElement>("filter-concept");
+    this.tabSearchBtn = this.require<HTMLButtonElement>("tab-search");
+    this.tabChatBtn = this.require<HTMLButtonElement>("tab-chat");
+    this.searchView = this.require<HTMLElement>("search-view");
+    this.chatView = this.require<HTMLElement>("chat-view");
+    this.chatLog = this.require<HTMLElement>("chat-log");
+    this.chatForm = this.require<HTMLFormElement>("chat-form");
+    this.chatInput = this.require<HTMLInputElement>("chat-input");
+    this.chatResetBtn = this.require<HTMLButtonElement>("chat-reset");
 
     this.doc.getElementById("query-form")?.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -83,16 +107,42 @@ export class PopupController {
       this.toggleConceptFilter();
     });
 
+    this.tabSearchBtn.addEventListener("click", () => this.switchTab("search"));
+    this.tabChatBtn.addEventListener("click", () => this.switchTab("chat"));
+
+    this.chatForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      this.submitChat();
+    });
+
+    this.chatResetBtn.addEventListener("click", () => {
+      this.resetChat();
+    });
+
     chrome.runtime.onMessage.addListener((message) => {
       if (!this.isRuntimeMessage(message)) {
         return;
       }
       switch (message.type) {
         case "MEMORY_QUERY_RESULT":
-          this.renderResults(message.payload);
+          if (this.activeTab === "chat" && this.chatAwaiting) {
+            this.renderChatResponse(message.payload);
+          } else {
+            this.renderResults(message.payload);
+          }
           break;
         case "MEMORY_QUERY_ERROR":
-          this.setError(message.payload.message);
+          if (this.activeTab === "chat") {
+            this.renderChatError(message.payload.message);
+          } else {
+            this.setError(message.payload.message);
+          }
+          break;
+        case "MEMORY_UPDATE_ERROR":
+          this.setError(`Update failed: ${message.payload.message}`);
+          break;
+        case "MEMORY_UPDATE_RESULT":
+          this.statusEl.textContent = "Saved";
           break;
         default:
           break;
@@ -189,10 +239,112 @@ export class PopupController {
     this.errorEl.textContent = "";
   }
 
+  private switchTab(target: "search" | "chat"): void {
+    this.activeTab = target;
+    this.searchView.hidden = target !== "search";
+    this.chatView.hidden = target !== "chat";
+    this.tabSearchBtn.classList.toggle("active", target === "search");
+    this.tabChatBtn.classList.toggle("active", target === "chat");
+    if (target === "chat") {
+      this.chatInput.focus();
+    }
+  }
+
+  private submitChat(): void {
+    const query = this.chatInput.value.trim();
+    if (!query) {
+      return;
+    }
+    const priorHistory = this.chatHistory.slice(-3);
+    this.chatInput.value = "";
+    this.chatAwaiting = true;
+    this.chatHistory.push({ role: "user", content: query });
+    this.appendChatBubble("user", query);
+    this.chatPendingBubble = this.appendChatBubble("assistant", "…");
+
+    chrome.runtime.sendMessage(
+      {
+        schemaVersion: SCHEMA_VERSION,
+        type: "MEMORY_QUERY",
+        payload: {
+          query,
+          filters: this.filters,
+          conversationId: this.conversationId,
+          history: priorHistory
+        }
+      },
+      () => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          this.renderChatError(err.message ?? "Unable to submit chat");
+        }
+      }
+    );
+  }
+
   private setError(message: string): void {
     this.errorEl.textContent = message;
     this.statusEl.textContent = "";
     this.statusEl.dataset.state = "error";
+  }
+
+  private renderChatResponse(response: MemoryQueryResponseMessage): void {
+    if (this.chatPendingBubble) {
+      this.chatPendingBubble.remove();
+      this.chatPendingBubble = undefined;
+    }
+    this.chatAwaiting = false;
+
+    if (response.answer?.text) {
+      const meta: string[] = [];
+      if (response.answer.sources?.length) {
+        meta.push(`Sources: ${response.answer.sources.join(", ")}`);
+      }
+      this.appendChatBubble("assistant", response.answer.text, meta);
+      this.chatHistory.push({
+        role: "assistant",
+        content: response.answer.text,
+        sourceIds: response.answer.sourceIds
+      });
+    } else {
+      this.appendChatBubble("assistant", "No direct answer; showing top results.");
+      this.chatHistory.push({ role: "assistant", content: "No answer" });
+    }
+  }
+
+  private renderChatError(message: string): void {
+    if (this.chatPendingBubble) {
+      this.chatPendingBubble.remove();
+      this.chatPendingBubble = undefined;
+    }
+    this.chatAwaiting = false;
+    this.appendChatBubble("assistant", message);
+  }
+
+  private appendChatBubble(role: "user" | "assistant", text: string, meta?: string[]): HTMLElement {
+    const bubble = this.doc.createElement("div");
+    bubble.className = `bubble ${role}`;
+    bubble.textContent = text;
+    if (meta?.length) {
+      const metaEl = this.doc.createElement("div");
+      metaEl.style.fontSize = "11px";
+      metaEl.style.marginTop = "4px";
+      metaEl.textContent = meta.join(" • ");
+      bubble.appendChild(metaEl);
+    }
+    this.chatLog.appendChild(bubble);
+    this.chatLog.scrollTop = this.chatLog.scrollHeight;
+    return bubble;
+  }
+
+  private resetChat(): void {
+    this.chatLog.innerHTML = "";
+    this.chatHistory = [];
+    this.chatAwaiting = false;
+    this.chatPendingBubble = undefined;
+    this.conversationId = typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `conv-${Date.now()}`;
   }
 
   private renderResults(response: MemoryQueryResponseMessage): void {
@@ -253,6 +405,21 @@ export class PopupController {
     snippet.textContent = hit.snippet;
     card.appendChild(snippet);
 
+    const note = this.doc.createElement("div");
+    note.className = "note";
+    note.textContent = hit.userNote ? hit.userNote : "Add a note";
+    card.appendChild(note);
+
+    const tagsRow = this.doc.createElement("div");
+    tagsRow.className = "tags";
+    (hit.tags ?? []).forEach((tag) => {
+      const chip = this.doc.createElement("span");
+      chip.className = "tag-chip";
+      chip.textContent = tag;
+      tagsRow.appendChild(chip);
+    });
+    card.appendChild(tagsRow);
+
     const actions = this.doc.createElement("div");
     actions.className = "actions";
 
@@ -282,6 +449,12 @@ export class PopupController {
     });
     actions.appendChild(copyBtn);
 
+    const editBtn = this.doc.createElement("button");
+    editBtn.textContent = "Edit note/tags";
+    editBtn.type = "button";
+    editBtn.addEventListener("click", () => this.editAnnotation(hit, note, tagsRow));
+    actions.appendChild(editBtn);
+
     card.appendChild(actions);
     return card;
   }
@@ -295,6 +468,46 @@ export class PopupController {
     } catch {
       return timestamp;
     }
+  }
+
+  private editAnnotation(hit: MemoryQueryHit, noteEl: HTMLElement, tagsRow: HTMLElement): void {
+    const noteInput = this.doc.defaultView?.prompt("Add a note (200 chars max)", hit.userNote ?? "");
+    if (noteInput === null) {
+      return;
+    }
+    const trimmedNote = noteInput.trim().slice(0, 200) || undefined;
+
+    const tagInput = this.doc.defaultView?.prompt(
+      "Tags (comma or space separated, max 10)",
+      (hit.tags ?? []).join(", ")
+    );
+    if (tagInput === null) {
+      return;
+    }
+    const tags = tagInput
+      .split(/[\s,]+/)
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .slice(0, 10);
+
+    noteEl.textContent = trimmedNote ?? "Add a note";
+    tagsRow.innerHTML = "";
+    tags.forEach((tag) => {
+      const chip = this.doc.createElement("span");
+      chip.className = "tag-chip";
+      chip.textContent = tag.toLowerCase();
+      tagsRow.appendChild(chip);
+    });
+
+    chrome.runtime.sendMessage({
+      schemaVersion: SCHEMA_VERSION,
+      type: "MEMORY_UPDATE_REQUEST",
+      payload: {
+        id: hit.id,
+        userNote: trimmedNote,
+        tags
+      }
+    });
   }
 
   private isRuntimeMessage(message: unknown): message is RuntimeMessage {

@@ -51,6 +51,8 @@ interface StoredRecord {
   conceptIds: string[];
   relations: StoredRelation[];
   tags: string[];
+  userNote?: string;
+  updatedAt?: string;
   image?: MemoryIndexItem["image"];
   createdAt: string;
   embedModelVersion: string;
@@ -80,6 +82,7 @@ export interface MemorySearchOptions {
   until?: string;
   entityTypes?: string[];
   conceptIds?: string[];
+  tags?: string[];
 }
 
 export class MemoryStore {
@@ -172,6 +175,7 @@ export class MemoryStore {
 
   async stats(): Promise<MemoryStatsResponse> {
     await this.load();
+    const { counts: tagCounts, taggedItems } = this.buildTagCounts();
     return {
       schemaVersion: MEMORY_SCHEMA_VERSION,
       items: this.records.length,
@@ -180,19 +184,23 @@ export class MemoryStore {
       lastPersistedAt: this.lastPersistedAt,
       embedModelVersion: this.embedModelVersion,
       embedDimensions: this.vectorLength ?? 0,
-      compactions: this.compactions
+      compactions: this.compactions,
+      tagCounts,
+      taggedItems
     };
   }
 
   async search(options: MemorySearchOptions): Promise<MemoryQueryHit[]> {
     await this.load();
-    const { vector, topK, domain, domains, since, until, entityTypes, conceptIds } = options;
+    const { vector, topK, domain, domains, since, until, entityTypes, conceptIds, tags } = options;
 
     const sinceDate = since ? Date.parse(since) : null;
     const untilDate = until ? Date.parse(until) : null;
     const domainHosts = buildDomainSet([domain, ...(domains ?? [])].filter(Boolean) as string[]);
     const conceptFilter = conceptIds ? new Set(conceptIds) : null;
     const entityFilter = entityTypes ? new Set(entityTypes) : null;
+
+    const tagFilter = tags ? new Set(tags.map((value) => value.toLowerCase())) : null;
 
     const scored = this.records
       .filter((record) => {
@@ -206,6 +214,9 @@ export class MemoryStore {
           return false;
         }
         if (conceptFilter && !record.conceptIds.some((id) => conceptFilter.has(id))) {
+          return false;
+        }
+        if (tagFilter && !record.tags.some((tag) => tagFilter.has(tag))) {
           return false;
         }
         if (sinceDate && record.capturedAt && Date.parse(record.capturedAt) < sinceDate) {
@@ -238,6 +249,8 @@ export class MemoryStore {
         conceptIds: record.conceptIds,
         relations: record.relations,
         tags: record.tags,
+        userNote: record.userNote,
+        updatedAt: record.updatedAt,
         sourceDomain: record.sourceDomain ?? undefined,
         similarity,
         duplicateOf: record.duplicateOf
@@ -265,8 +278,12 @@ export class MemoryStore {
           record.conceptIds = Array.from(new Set(mutation.conceptIds));
         }
         if (mutation.tags) {
-          record.tags = Array.from(new Set(mutation.tags));
+          record.tags = Array.from(new Set(mutation.tags.map((tag) => tag.toLowerCase())));
         }
+        if (mutation.userNote !== undefined) {
+          record.userNote = mutation.userNote?.trim() || undefined;
+        }
+        record.updatedAt = new Date().toISOString();
       }
 
       await this.persist();
@@ -285,6 +302,8 @@ export class MemoryStore {
         conceptIds: refreshed.conceptIds,
         relations: refreshed.relations,
         tags: refreshed.tags,
+        userNote: refreshed.userNote,
+        updatedAt: refreshed.updatedAt,
         sourceDomain: refreshed.sourceDomain ?? undefined,
         similarity: 1
       });
@@ -306,6 +325,11 @@ export class MemoryStore {
       const raw = await fs.readFile(this.dbPath, "utf8");
       const parsed = JSON.parse(raw) as PersistenceFile;
       if (parsed.schemaVersion !== MEMORY_SCHEMA_VERSION) {
+        const migrated = this.migrateLegacyFile(parsed);
+        if (migrated) {
+          await fs.writeFile(this.dbPath, JSON.stringify(migrated), "utf8");
+          return this.initializeFromDisk();
+        }
         await this.backupExisting();
         this.records = [];
         this.vectorLength = null;
@@ -400,7 +424,9 @@ export class MemoryStore {
         entityType,
         conceptIds,
         relations: item.relations ?? [],
-        tags: item.tags ?? [],
+        tags: dedupeTags(item.tags ?? []),
+        userNote: item.userNote?.trim() || undefined,
+        updatedAt: item.updatedAt ?? new Date().toISOString(),
         image: item.image,
         createdAt: new Date().toISOString(),
         embedModelVersion: this.embedModelVersion,
@@ -501,6 +527,40 @@ export class MemoryStore {
     }
     await fs.rm(this.dbPath, { force: true });
   }
+
+  private migrateLegacyFile(file: PersistenceFile): PersistenceFile | null {
+    if (file.schemaVersion === 1) {
+      return {
+        ...file,
+        schemaVersion: MEMORY_SCHEMA_VERSION,
+        items: file.items.map((item) => ({
+          ...item,
+          userNote: item.userNote ?? undefined,
+          tags: dedupeTags((item as PersistenceRecord & { tags?: string[] }).tags ?? []),
+          updatedAt: item.updatedAt ?? item.capturedAt ?? item.createdAt
+        }))
+      };
+    }
+    return null;
+  }
+
+  private buildTagCounts(): { counts: Record<string, number>; taggedItems: number } {
+    const counts: Record<string, number> = {};
+    let taggedItems = 0;
+    for (const record of this.records) {
+      if (record.tags?.length) {
+        taggedItems += 1;
+      }
+      for (const tag of record.tags ?? []) {
+        counts[tag] = (counts[tag] ?? 0) + 1;
+      }
+    }
+    return { counts, taggedItems };
+  }
+}
+
+function dedupeTags(tags: string[]): string[] {
+  return Array.from(new Set(tags.map((tag) => tag.toLowerCase())));
 }
 
 function chunkText(text: string, maxChars: number): string[] {

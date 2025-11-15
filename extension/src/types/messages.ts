@@ -1,5 +1,5 @@
 export const SCHEMA_VERSION = 1 as const;
-export const MEMORY_SCHEMA_VERSION = 1 as const;
+export const MEMORY_SCHEMA_VERSION = 2 as const;
 
 export type ImageRef =
   | { kind: "tag"; tag: string }
@@ -71,6 +71,8 @@ export interface MemoryIndexItem {
   conceptIds?: string[];
   relations?: Array<{ type: string; targetId: string }>;
   tags?: string[];
+  userNote?: string;
+  updatedAt?: string;
 }
 
 export interface MemoryIndexRequest {
@@ -105,12 +107,15 @@ export interface MemoryQueryFilters {
   limit?: number;
   entityTypes?: string[];
   conceptIds?: string[];
+  tags?: string[];
 }
 
 export interface MemoryQueryRequestMessage {
   query: string;
   topK?: number;
   filters?: MemoryQueryFilters;
+  conversationId?: string;
+  history?: Array<{ role: "user" | "assistant"; content: string; sourceIds?: string[] }>;
 }
 
 export interface MemoryQueryHit {
@@ -127,6 +132,8 @@ export interface MemoryQueryHit {
   conceptIds?: string[];
   relations?: Array<{ type: string; targetId: string }>;
   tags?: string[];
+  userNote?: string;
+  updatedAt?: string;
   sourceDomain?: string;
   similarity: number;
 }
@@ -164,4 +171,7 @@ export type RuntimeMessage =
   | RuntimeMessageBase<"MEMORY_CAPTURE_NOW", { force?: boolean }>
   | RuntimeMessageBase<"MEMORY_QUERY", MemoryQueryRequestMessage>
   | RuntimeMessageBase<"MEMORY_QUERY_RESULT", MemoryQueryResponseMessage>
-  | RuntimeMessageBase<"MEMORY_QUERY_ERROR", MemoryQueryErrorMessage>;
+  | RuntimeMessageBase<"MEMORY_QUERY_ERROR", MemoryQueryErrorMessage>
+  | RuntimeMessageBase<"MEMORY_UPDATE_REQUEST", { id: string; userNote?: string; tags?: string[] }>
+  | RuntimeMessageBase<"MEMORY_UPDATE_RESULT", { id: string; userNote?: string; tags?: string[] }>
+  | RuntimeMessageBase<"MEMORY_UPDATE_ERROR", { id: string; message: string }>;

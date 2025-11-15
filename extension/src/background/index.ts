@@ -9,6 +9,7 @@ import type {
   MemoryIndexItem,
   MemoryIndexRequest,
   MemoryIndexResponse,
+  MemoryQueryHit,
   MemoryQueryRequestMessage,
   MemoryQueryResponseMessage,
   RuntimeMessage
@@ -64,6 +65,8 @@ const ANALYZE_BATCH_ENDPOINT = `${API_BASE_URL}/api/analyze/batch`;
 const REGISTER_ORIGIN_ENDPOINT = `${API_BASE_URL}/api/dev/register-extension-origin`;
 const MEMORY_INDEX_ENDPOINT = `${API_BASE_URL}/api/memory/index`;
 const MEMORY_QUERY_ENDPOINT = `${API_BASE_URL}/api/memory/query`;
+const MEMORY_ITEM_ENDPOINT = `${API_BASE_URL}/api/memory/items`;
+const MEMORY_STATS_ENDPOINT = `${API_BASE_URL}/api/memory/stats`;
 const REQUEST_TIMEOUT_MS = 25_000;
 const MAX_CONCURRENCY = 3;
 const MAX_RETRIES = 2;
@@ -77,6 +80,8 @@ const MEMORY_BATCH_SIZE = 5;
 const MEMORY_QUEUE_LIMIT = 30;
 const MEMORY_BACKOFF_BASE_MS = 2_000;
 const MEMORY_BACKOFF_MAX_MS = 60_000;
+const CONVERSATION_TTL_MS = 10 * 60 * 1000;
+const CONVERSATION_HISTORY_LIMIT = 3;
 
 const queue: QueueItem[] = [];
 let pendingCount = 0;
@@ -104,6 +109,46 @@ interface MemoryQueryState {
 }
 
 const memoryQueryControllers = new Map<number, MemoryQueryState>();
+
+function getConversationState(tabId: number): ConversationState {
+  let state = conversationStates.get(tabId);
+  if (!state) {
+    state = { conversationId: createConversationId(), history: [] };
+    conversationStates.set(tabId, state);
+  }
+  if (state.idleTimer) {
+    clearTimeout(state.idleTimer);
+  }
+  state.idleTimer = setTimeout(() => {
+    conversationStates.delete(tabId);
+  }, CONVERSATION_TTL_MS) as unknown as number;
+  return state;
+}
+
+function resetConversationState(tabId: number): void {
+  const state = conversationStates.get(tabId);
+  if (state?.idleTimer) {
+    clearTimeout(state.idleTimer);
+  }
+  conversationStates.set(tabId, { conversationId: createConversationId(), history: [] });
+}
+
+function createConversationId(): string {
+  const randomUUID = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function";
+  if (randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `conv-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+type ConversationTurn = MemoryQueryRequestMessage["history"] extends Array<infer T> ? T : never;
+interface ConversationState {
+  conversationId: string;
+  history: ConversationTurn[];
+  idleTimer?: number;
+}
+
+const conversationStates = new Map<number, ConversationState>();
 
 interface BackendRequestOptions {
   onForbiddenRecovery?: () => void;
@@ -926,7 +971,9 @@ async function performMemoryQuery(
         schemaVersion: MEMORY_SCHEMA_VERSION,
         query: payload.query,
         topK: payload.topK,
-        filters: payload.filters
+        filters: payload.filters,
+        conversationId: payload.conversationId,
+        history: payload.history
       }),
       signal
     });
@@ -1092,7 +1139,7 @@ function isValidRequest(payload: unknown): payload is ItemAnalysisRequest {
     record.id.length > 0 &&
     typeof record.text === "string" &&
     record.text.length > 0 &&
-    (record.image === undefined || typeof record.image === "string")
+    (record.image === undefined || typeof record.image === "string" || typeof record.image === "object")
   );
 }
 
@@ -1181,6 +1228,8 @@ chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
       return handleMemoryIndexMessage(message.payload, sender, sendResponse);
     case "MEMORY_QUERY":
       return handleMemoryQueryMessage(message.payload, sender, sendResponse);
+    case "MEMORY_UPDATE_REQUEST":
+      return handleMemoryUpdateMessage(message.payload, sender, sendResponse);
     default:
       return false;
   }
@@ -1247,16 +1296,16 @@ function handleMemoryQueryMessage(
   sender: chrome.runtime.MessageSender,
   sendResponse?: (response?: unknown) => void
 ): boolean {
-  const tabId = sender.tab?.id;
-  if (tabId == null) {
-    logError("Received MEMORY_QUERY without tabId");
-    return false;
-  }
+  const tabId = sender.tab?.id ?? -1;
 
   if (!payload || typeof payload.query !== "string" || !payload.query.trim()) {
     logError("Received invalid MEMORY_QUERY payload", payload);
     return false;
   }
+
+  const conversation = getConversationState(tabId);
+  const history = payload.history ?? conversation.history.slice(-CONVERSATION_HISTORY_LIMIT);
+  const conversationId = payload.conversationId ?? conversation.conversationId;
 
   const state = getMemoryQueryState(tabId);
   state.controller?.abort();
@@ -1271,7 +1320,9 @@ function handleMemoryQueryMessage(
           schemaVersion: MEMORY_SCHEMA_VERSION,
           query: payload.query,
           topK: payload.topK,
-          filters: payload.filters
+          filters: payload.filters,
+          conversationId,
+          history
         },
         state.controller?.signal
       );
@@ -1283,6 +1334,22 @@ function handleMemoryQueryMessage(
         type: "MEMORY_QUERY_RESULT",
         payload: response
       });
+
+      const turns: ConversationTurn[] = [
+        { role: "user", content: payload.query }
+      ];
+      if (response.answer?.text) {
+        turns.push({
+          role: "assistant",
+          content: response.answer.text,
+          sourceIds: response.answer.sourceIds
+        });
+      }
+      conversationStates.set(tabId, {
+        conversationId,
+        history: [...history, ...turns].slice(-CONVERSATION_HISTORY_LIMIT),
+        idleTimer: conversation.idleTimer
+      });
     } catch (error) {
       if (state.token !== currentToken) {
         return;
@@ -1292,6 +1359,58 @@ function handleMemoryQueryMessage(
         schemaVersion: SCHEMA_VERSION,
         type: "MEMORY_QUERY_ERROR",
         payload: { message }
+      });
+    }
+  })();
+
+  sendResponse?.({ accepted: true });
+  return false;
+}
+
+function handleMemoryUpdateMessage(
+  payload: { id: string; userNote?: string; tags?: string[] },
+  _sender: chrome.runtime.MessageSender,
+  sendResponse?: (response?: unknown) => void
+): boolean {
+  if (!payload?.id) {
+    logError("Received MEMORY_UPDATE_REQUEST without id", payload);
+    return false;
+  }
+
+  void (async () => {
+    try {
+      const response = await fetch(`${MEMORY_ITEM_ENDPOINT}/${encodeURIComponent(payload.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: MEMORY_SCHEMA_VERSION,
+          userNote: payload.userNote,
+          tags: payload.tags
+        })
+      });
+
+      if (!response.ok) {
+        const message = `Update failed with HTTP ${response.status}`;
+        chrome.runtime.sendMessage({
+          schemaVersion: SCHEMA_VERSION,
+          type: "MEMORY_UPDATE_ERROR",
+          payload: { id: payload.id, message }
+        });
+        return;
+      }
+
+      const data = (await response.json()) as MemoryQueryHit;
+      chrome.runtime.sendMessage({
+        schemaVersion: SCHEMA_VERSION,
+        type: "MEMORY_UPDATE_RESULT",
+        payload: { id: payload.id, userNote: data.userNote, tags: data.tags }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      chrome.runtime.sendMessage({
+        schemaVersion: SCHEMA_VERSION,
+        type: "MEMORY_UPDATE_ERROR",
+        payload: { id: payload.id, message }
       });
     }
   })();

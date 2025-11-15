@@ -54,6 +54,14 @@
         gap: 8px;
         margin-bottom: 8px;
       }
+      .tabs {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+      .tabs button {
+        flex: 1;
+      }
       #status {
         font-size: 13px;
         color: #475569;
@@ -115,29 +123,91 @@
         flex: 1 1 auto;
         font-size: 12px;
       }
+      .tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 4px 0;
+      }
+      .tag-chip {
+        background: #e0f2fe;
+        color: #0f172a;
+        padding: 2px 6px;
+        border-radius: 6px;
+        font-size: 11px;
+      }
+      .note {
+        font-size: 12px;
+        color: #111827;
+        background: #f8fafc;
+        padding: 6px;
+        border-radius: 6px;
+        margin-bottom: 6px;
+      }
+      #chat-log {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-height: 260px;
+        overflow-y: auto;
+        margin-bottom: 10px;
+      }
+      .bubble {
+        padding: 10px;
+        border-radius: 10px;
+        white-space: pre-wrap;
+        font-size: 13px;
+      }
+      .bubble.user {
+        background: #e0f2fe;
+        align-self: flex-end;
+      }
+      .bubble.assistant {
+        background: #f5f6ff;
+        border: 1px solid #cbd5f5;
+      }
     </style>
   </head>
   <body>
-    <h1>Search Memory</h1>
-    <form id="query-form">
-      <input id="query-input" type="text" placeholder="e.g. async React article" />
-      <button id="search-button" type="submit">Search</button>
-    </form>
-    <div class="filters">
-      <button id="filter-domain" type="button" class="secondary">This domain</button>
-      <button id="filter-recent" type="button" class="secondary">Past 7 days</button>
-      <button id="filter-entity" type="button" class="secondary">All entities</button>
-      <button id="filter-concept" type="button" class="secondary">Concept filter</button>
+    <div class="tabs">
+      <button id="tab-search" class="active" type="button">Search</button>
+      <button id="tab-chat" type="button">Chat</button>
     </div>
-    <div id="status"></div>
-    <div id="error"></div>
-    <section id="answer" hidden>
-      <h2>Answer</h2>
-      <p></p>
-      <strong>Sources</strong>
-      <ul></ul>
+
+    <section id="search-view">
+      <h1>Search Memory</h1>
+      <form id="query-form">
+        <input id="query-input" type="text" placeholder="e.g. async React article" />
+        <button id="search-button" type="submit">Search</button>
+      </form>
+      <div class="filters">
+        <button id="filter-domain" type="button" class="secondary">This domain</button>
+        <button id="filter-recent" type="button" class="secondary">Past 7 days</button>
+        <button id="filter-entity" type="button" class="secondary">All entities</button>
+        <button id="filter-concept" type="button" class="secondary">Concept filter</button>
+      </div>
+      <div id="status"></div>
+      <div id="error"></div>
+      <section id="answer" hidden>
+        <h2>Answer</h2>
+        <p></p>
+        <strong>Sources</strong>
+        <ul></ul>
+      </section>
+      <section id="results"></section>
     </section>
-    <section id="results"></section>
+
+    <section id="chat-view" hidden>
+      <h1>Memory Chat</h1>
+      <div id="chat-log"></div>
+      <form id="chat-form">
+        <input id="chat-input" type="text" placeholder="Ask a follow-up..." />
+        <button id="chat-send" type="submit">Send</button>
+      </form>
+      <div class="filters">
+        <button id="chat-reset" type="button" class="secondary">Reset conversation</button>
+      </div>
+    </section>
     <script type="module" src="dist/popup.js"></script>
   </body>
 </html>

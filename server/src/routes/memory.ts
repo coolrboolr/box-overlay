@@ -13,6 +13,7 @@ import {
 import { generateEmbedding } from "../services/embedding";
 import { env } from "../env";
 import { generateMemoryAnswer } from "../services/memoryAnswer";
+import { conversationStore } from "../memory/conversation";
 
 interface MemoryRouterOptions {
   enabled: boolean;
@@ -93,7 +94,10 @@ export function createMemoryRouter(options: MemoryRouterOptions) {
     }
 
     try {
-      const { query, topK, filters } = parseResult.data;
+      conversationStore.pruneExpired();
+      const { query, topK, filters, conversationId, history } = parseResult.data;
+      const session = conversationId ? conversationStore.getOrCreate(conversationId) : null;
+      const effectiveHistory = history ?? session?.history ?? [];
       const vector = await generateEmbedding(query);
       const effectiveTopK = Math.min(topK, filters?.limit ?? topK);
       const hits = await store.search({
@@ -104,7 +108,8 @@ export function createMemoryRouter(options: MemoryRouterOptions) {
         since: filters?.since,
         until: filters?.until,
         entityTypes: filters?.entityTypes,
-        conceptIds: filters?.conceptIds
+        conceptIds: filters?.conceptIds,
+        tags: filters?.tags
       });
 
       let answer:
@@ -117,7 +122,9 @@ export function createMemoryRouter(options: MemoryRouterOptions) {
 
       if (env.enableMemoryAnswers && hits.length) {
         try {
-          answer = await generateMemoryAnswer(query, hits.slice(0, Math.min(3, hits.length)));
+          answer = await generateMemoryAnswer(query, hits.slice(0, Math.min(3, hits.length)), {
+            history: effectiveHistory
+          });
         } catch (error) {
           console.warn("[memory] answer generation failed", error);
         }
@@ -128,6 +135,24 @@ export function createMemoryRouter(options: MemoryRouterOptions) {
         results: hits,
         answer
       });
+
+      if (session) {
+        session.history = [...effectiveHistory, { role: "user", content: query }];
+        if (answer?.text) {
+          session.history.push({
+            role: "assistant",
+            content: answer.text,
+            sourceIds: answer.sourceIds
+          });
+        }
+        conversationStore.update(session.id, {
+          history: session.history,
+          lastQuery: query,
+          lastAnswer: answer?.text,
+          appliedFilters: filters,
+          lastSourceIds: answer?.sourceIds
+        });
+      }
       return res.json(payload);
     } catch (error) {
       console.error("[memory] query failed", error);

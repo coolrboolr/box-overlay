@@ -160,6 +160,22 @@ These tools are dev-only (`isDev` builds). They never run in production bundles.
 - **Service worker sleeping** — keep the devtools console open for the extension’s background worker to hold it in a running state while debugging queue/concurrency behavior.
 - **Telemetry HUD storage warning** — iframe-heavy sites (BuzzFeed quizzes, embeds) block `chrome.storage.session`. The HUD now falls back to in-memory counters and prints a single debug line; exports remain accurate.
 
+## Annotating Memory (notes & tags)
+
+1. Start the backend with `MEMORY_ENABLED=true` and build the extension (`npm run watch`).
+2. In the popup, run a query and click **Edit note/tags** on a result card.
+3. Enter a short note (≤200 chars) and a handful of tags (comma/space separated, ≤10, alphanumeric plus -_/).
+4. Save and re-run the query; the note and tag chips should persist and appear in new results.
+5. Verify `/api/memory/stats` returns `tagCounts` and `taggedItems` > 0.
+
+## Multi-turn Memory Chat
+
+1. Open the popup and switch to the **Chat** tab.
+2. Ask an initial question; a conversation ID is generated and kept locally (service worker only).
+3. Ask a follow-up that references the first answer; the assistant bubble should prefix **“Using earlier context…”** when history is applied.
+4. Click **Reset conversation** to clear local history; the next turn should start fresh and omit the context prefix.
+5. Confirm privacy: reload the extension/background—conversation history should clear because it never persists to disk.
+
 ## SPEC13 Validation Runbook
 
 1. **Start the backend.**
