@@ -51,8 +51,45 @@
       }
       .filters {
         display: flex;
-        gap: 8px;
+        flex-direction: column;
+        gap: 6px;
         margin-bottom: 8px;
+      }
+      .filter-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .chip {
+        background: #e0f2fe;
+        color: #0f172a;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .chip button {
+        border: none;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        padding: 0;
+        font-size: 12px;
+      }
+      select.secondary {
+        background: #e5e7eb;
+        color: #1f2937;
+        border: 1px solid #cbd5f5;
+        padding: 8px 10px;
+        border-radius: 8px;
       }
       .tabs {
         display: flex;
@@ -91,6 +128,23 @@
         margin: 0;
         font-size: 12px;
       }
+      #answer .muted {
+        color: #475569;
+        font-size: 12px;
+        margin: 4px 0 0;
+      }
+      .source-chip {
+        background: #eef2ff;
+        color: #1e293b;
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 11px;
+        border: 1px solid #cbd5f5;
+        cursor: pointer;
+      }
+      .source-chip:hover {
+        background: #e0e7ff;
+      }
       #results {
         display: flex;
         flex-direction: column;
@@ -102,6 +156,10 @@
         border-radius: 10px;
         padding: 10px;
         box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+      }
+      .result.focused {
+        outline: 2px solid #2563eb;
+        outline-offset: 2px;
       }
       .result h3 {
         font-size: 14px;
@@ -181,18 +239,36 @@
         <button id="search-button" type="submit">Search</button>
       </form>
       <div class="filters">
-        <button id="filter-domain" type="button" class="secondary">This domain</button>
-        <button id="filter-recent" type="button" class="secondary">Past 7 days</button>
-        <button id="filter-entity" type="button" class="secondary">All entities</button>
-        <button id="filter-concept" type="button" class="secondary">Concept filter</button>
+        <div class="filter-row">
+          <button id="filter-domain" type="button" class="secondary">This domain</button>
+          <button id="filter-add-domain" type="button" class="secondary">Add domain</button>
+          <select id="filter-range" class="secondary">
+            <option value="">Any time</option>
+            <option value="7">Past 7 days</option>
+            <option value="30">Past 30 days</option>
+            <option value="90">Past 90 days</option>
+          </select>
+          <select id="topk-select" class="secondary">
+            <option value="3">Top 3</option>
+            <option value="5" selected>Top 5</option>
+            <option value="8">Top 8</option>
+          </select>
+        </div>
+        <div class="filter-row chips" id="domain-chips"></div>
+        <div class="filter-row">
+          <button id="filter-tags" type="button" class="secondary">Tag filter</button>
+          <button id="filter-entity" type="button" class="secondary">All entities</button>
+          <button id="filter-concept" type="button" class="secondary">Concept filter</button>
+        </div>
+        <div class="filter-row chips" id="tag-chips"></div>
       </div>
       <div id="status"></div>
       <div id="error"></div>
       <section id="answer" hidden>
         <h2>Answer</h2>
-        <p></p>
-        <strong>Sources</strong>
-        <ul></ul>
+        <p id="answer-text"></p>
+        <p id="answer-note" class="muted"></p>
+        <div id="answer-sources" class="chips"></div>
       </section>
       <section id="results"></section>
     </section>

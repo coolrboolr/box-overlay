@@ -10,7 +10,10 @@ export type TelemetryEventType =
   | "forbidden-error"
   | "batch-fallback"
   | "memory-index"
-  | "memory-index-result";
+  | "memory-index-result"
+  | "memory-filters"
+  | "memory-highlight"
+  | "memory-answer-failure";
 
 export interface TelemetryEntry {
   type: TelemetryEventType;
@@ -27,6 +30,9 @@ export interface TelemetryStats {
   forbiddenRecoveries: number;
   forbiddenErrors: number;
   batchFallbacks: number;
+  memoryFilters: number;
+  memoryHighlights: number;
+  memoryAnswerFailures: number;
 }
 
 const DEFAULT_STATS: TelemetryStats = {
@@ -37,7 +43,10 @@ const DEFAULT_STATS: TelemetryStats = {
   errors: 0,
   forbiddenRecoveries: 0,
   forbiddenErrors: 0,
-  batchFallbacks: 0
+  batchFallbacks: 0,
+  memoryFilters: 0,
+  memoryHighlights: 0,
+  memoryAnswerFailures: 0
 };
 
 const STORAGE_KEY = "overlayTelemetryLogs";
@@ -82,7 +91,10 @@ const eventToStat: Record<TelemetryEventType, StatKey | null> = {
   "forbidden-error": "forbiddenErrors",
   "batch-fallback": "batchFallbacks",
   "memory-index": null,
-  "memory-index-result": null
+  "memory-index-result": null,
+  "memory-filters": "memoryFilters",
+  "memory-highlight": "memoryHighlights",
+  "memory-answer-failure": "memoryAnswerFailures"
 };
 
 function scheduleNotify(): void {

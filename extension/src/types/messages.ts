@@ -35,7 +35,12 @@ export interface AnalyzeError {
   details?: string;
 }
 
-export type DevTelemetryEventName = "FORBIDDEN_RECOVERY" | "BATCH_FALLBACK";
+export type DevTelemetryEventName =
+  | "FORBIDDEN_RECOVERY"
+  | "BATCH_FALLBACK"
+  | "MEMORY_FILTERS"
+  | "MEMORY_HIGHLIGHT"
+  | "MEMORY_ANSWER_FAILURE";
 
 export interface DevTelemetryEventPayload {
   event: DevTelemetryEventName;
@@ -146,6 +151,7 @@ export interface MemoryQueryResponseMessage {
     sources: string[];
     sourceIds?: string[];
   };
+  answerSuppressed?: string;
 }
 
 export interface MemoryQueryErrorMessage {
@@ -172,6 +178,9 @@ export type RuntimeMessage =
   | RuntimeMessageBase<"MEMORY_QUERY", MemoryQueryRequestMessage>
   | RuntimeMessageBase<"MEMORY_QUERY_RESULT", MemoryQueryResponseMessage>
   | RuntimeMessageBase<"MEMORY_QUERY_ERROR", MemoryQueryErrorMessage>
+  | RuntimeMessageBase<"MEMORY_HIGHLIGHT", { url?: string; sourceId?: string; snippet: string; title?: string }>
+  | RuntimeMessageBase<"MEMORY_HIGHLIGHT_RENDER", { sourceId?: string; snippet: string }>
+  | RuntimeMessageBase<"MEMORY_HIGHLIGHT_ERROR", { message: string }>
   | RuntimeMessageBase<"MEMORY_UPDATE_REQUEST", { id: string; userNote?: string; tags?: string[] }>
   | RuntimeMessageBase<"MEMORY_UPDATE_RESULT", { id: string; userNote?: string; tags?: string[] }>
   | RuntimeMessageBase<"MEMORY_UPDATE_ERROR", { id: string; message: string }>;

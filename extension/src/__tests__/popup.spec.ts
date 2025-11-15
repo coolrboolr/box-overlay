@@ -15,17 +15,27 @@ function setupDom() {
       <button id="search-button" type="submit">Search</button>
     </form>
     <div class="filters">
-      <button id="filter-domain" type="button"></button>
-      <button id="filter-recent" type="button"></button>
-      <button id="filter-entity" type="button"></button>
-      <button id="filter-concept" type="button"></button>
+      <div class="filter-row">
+        <button id="filter-domain" type="button"></button>
+        <button id="filter-add-domain" type="button"></button>
+        <select id="filter-range"><option value="">Any time</option></select>
+        <select id="topk-select"><option value="5" selected>Top 5</option></select>
+      </div>
+      <div id="domain-chips"></div>
+      <div class="filter-row">
+        <button id="filter-tags" type="button"></button>
+        <button id="filter-entity" type="button"></button>
+        <button id="filter-concept" type="button"></button>
+      </div>
+      <div id="tag-chips"></div>
     </div>
     <div id="status"></div>
     <div id="error"></div>
     <section id="answer" hidden>
       <h2>Answer</h2>
-      <p></p>
-      <ul></ul>
+      <p id="answer-text"></p>
+      <p id="answer-note"></p>
+      <div id="answer-sources"></div>
     </section>
     <section id="results"></section>
     </section>
@@ -70,7 +80,7 @@ describe("PopupController", () => {
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "MEMORY_QUERY",
-        payload: expect.objectContaining({ query: "memory test" })
+        payload: expect.objectContaining({ query: "memory test", topK: 5 })
       }),
       expect.any(Function)
     );

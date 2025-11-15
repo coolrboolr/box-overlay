@@ -240,6 +240,27 @@
       <p class="hint">Requires backend `MEMORY_ENABLED=true`. Use the button to force a flush while testing.</p>
     </section>
 
+    <section class="controls">
+      <h2>Filter Builder</h2>
+      <div class="config-row">
+        <input id="filter-query" type="text" placeholder="demo query" style="flex: 1" />
+      </div>
+      <div class="config-row">
+        <input id="filter-domains" type="text" placeholder="example.com, demo.dev" style="flex: 2" />
+        <select id="filter-range-select" class="secondary" style="flex: 1">
+          <option value="">Any time</option>
+          <option value="7">Past 7 days</option>
+          <option value="30">Past 30 days</option>
+          <option value="90">Past 90 days</option>
+        </select>
+      </div>
+      <div class="config-row">
+        <input id="filter-tags" type="text" placeholder="tag-one, tag-two" style="flex: 2" />
+        <button id="run-filter-test">Send MEMORY_QUERY</button>
+      </div>
+      <p id="filter-output" class="hint">Compose popup-style filters and see the simulated payload.</p>
+    </section>
+
     <section class="backend-panel">
       <h2>Backend Status</h2>
       <p id="backend-health" class="status-line">Checking…</p>
@@ -286,6 +307,7 @@
       (() => {
         const API_BASE_URL = "http://127.0.0.1:5000";
         const SCHEMA_VERSION = 1;
+        const MEMORY_SCHEMA_VERSION = 2;
         const nativeRuntime = window.chrome?.runtime ?? null;
         const storageState = new Map();
         const syncStorageState = new Map();
@@ -501,6 +523,95 @@
           }, delay);
         }
 
+        function handleMemoryQuery(request) {
+          const delay = Number(document.querySelector("#response-delay").value) || 0;
+          const filters = request.filters ?? {};
+          setTimeout(() => {
+            const filterSummary = Object.keys(filters).length
+              ? Object.entries(filters)
+                  .map(([key, value]) => `${key}:${Array.isArray(value) ? value.join("|") : value}`)
+                  .join(", ")
+              : "none";
+            const domain = (filters.domains && filters.domains[0]) || filters.domain || "example.com";
+            const hit = {
+              id: `hit-${Math.random().toString(16).slice(2, 7)}`,
+              parentId: "filter-builder",
+              sourceId: "filter-builder",
+              url: `https://${domain}/memory-demo`,
+              title: `Filter result for ${domain}`,
+              snippet: `Simulated match for "${request.query}" with filters: ${filterSummary}`,
+              capturedAt: new Date().toISOString(),
+              similarity: 0.87,
+              tags: filters.tags ?? [],
+              sourceDomain: domain
+            };
+
+            emitMessage({
+              schemaVersion: SCHEMA_VERSION,
+              type: "MEMORY_QUERY_RESULT",
+              payload: {
+                schemaVersion: MEMORY_SCHEMA_VERSION,
+                results: [hit],
+                answer: {
+                  text: `Filters applied: ${filterSummary}`,
+                  sources: ["filter-builder"]
+                }
+              }
+            });
+
+            const output = document.getElementById("filter-output");
+            if (output) {
+              output.textContent = `Sent MEMORY_QUERY with filters → ${filterSummary}`;
+            }
+          }, delay);
+        }
+
+        function triggerFilterBuilder() {
+          const queryInput = document.getElementById("filter-query");
+          const domainsInput = document.getElementById("filter-domains");
+          const tagsInput = document.getElementById("filter-tags");
+          const rangeSelect = document.getElementById("filter-range-select");
+
+          const query = queryInput?.value?.trim() || "demo query";
+          const domains = (domainsInput?.value || "")
+            .split(/[\s,]+/)
+            .map((value) => value.trim())
+            .filter(Boolean)
+            .slice(0, 3);
+          const tags = (tagsInput?.value || "")
+            .split(/[\s,]+/)
+            .map((value) => value.trim().toLowerCase())
+            .filter(Boolean)
+            .slice(0, 10);
+          const range = Number(rangeSelect?.value || 0);
+
+          const filters = {};
+          if (domains.length) {
+            filters.domains = domains;
+          }
+          if (tags.length) {
+            filters.tags = tags;
+          }
+          if (range) {
+            const now = Date.now();
+            filters.since = new Date(now - range * 24 * 60 * 60 * 1000).toISOString();
+            filters.until = new Date(now).toISOString();
+          }
+
+          nativeRuntime?.sendMessage(
+            {
+              schemaVersion: SCHEMA_VERSION,
+              type: "MEMORY_QUERY",
+              payload: {
+                query,
+                topK: 3,
+                filters
+              }
+            },
+            () => undefined
+          );
+        }
+
         const runtime = {
           id: "overlay-harness",
           lastError: undefined,
@@ -510,6 +621,12 @@
             }
             if (message?.type === "MEMORY_INDEX_REQUEST" && message.payload) {
               handleMemoryIndexRequest(message.payload);
+            }
+            if (message?.type === "MEMORY_QUERY" && message.payload) {
+              handleMemoryQuery(message.payload);
+            }
+            if (message?.type === "MEMORY_HIGHLIGHT" && message.payload) {
+              setBackendNote(`Highlight requested for ${message.payload.url || "active tab"}`);
             }
             responseCallback?.();
           },
@@ -582,6 +699,10 @@
             type: "MEMORY_CAPTURE_NOW",
             payload: { force: true }
           });
+        });
+
+        document.getElementById("run-filter-test")?.addEventListener("click", () => {
+          triggerFilterBuilder();
         });
 
         void refreshBackendStatus();

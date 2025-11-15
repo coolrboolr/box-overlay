@@ -1205,6 +1205,122 @@ function emitDevTelemetryEvent(
   });
 }
 
+function emitTelemetryEvent(
+  event: DevTelemetryEventName,
+  detail?: Record<string, unknown>,
+  tabId?: number | null
+): void {
+  if (tabId != null && tabId >= 0) {
+    emitDevTelemetryEvent(tabId, undefined, event, detail);
+    return;
+  }
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const targetId = tabs[0]?.id;
+    if (targetId != null) {
+      emitDevTelemetryEvent(targetId, undefined, event, detail);
+    }
+  });
+}
+
+function queryTabsAsync(query: chrome.tabs.QueryInfo): Promise<chrome.tabs.Tab[]> {
+  return new Promise((resolve) => {
+    chrome.tabs.query(query, (tabs) => resolve(tabs));
+  });
+}
+
+function getTabById(tabId: number): Promise<chrome.tabs.Tab | null> {
+  return new Promise((resolve) => {
+    chrome.tabs.get(tabId, (tab) => {
+      const err = chrome.runtime.lastError;
+      if (err) {
+        resolve(null);
+        return;
+      }
+      resolve(tab ?? null);
+    });
+  });
+}
+
+function focusTab(tabId: number): Promise<void> {
+  return new Promise((resolve) => {
+    chrome.tabs.update(tabId, { active: true }, () => resolve());
+  });
+}
+
+function waitForTabReady(tabId: number, timeoutMs = 5000): Promise<void> {
+  return new Promise((resolve) => {
+    chrome.tabs.get(tabId, (tab) => {
+      if (tab?.status === "complete") {
+        resolve();
+        return;
+      }
+
+      const timer = setTimeout(() => {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }, timeoutMs);
+
+      const listener = (id: number, info: chrome.tabs.TabChangeInfo) => {
+        if (id !== tabId) {
+          return;
+        }
+        if (info.status === "complete") {
+          clearTimeout(timer);
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      };
+
+      chrome.tabs.onUpdated.addListener(listener);
+    });
+  });
+}
+
+async function findHighlightTargetTab(
+  url: string | undefined,
+  fallbackTabId: number | null
+): Promise<chrome.tabs.Tab | null> {
+  if (url) {
+    const patterns = buildUrlPatterns(url);
+    if (patterns.length) {
+      const matches = await queryTabsAsync({ url: patterns });
+      if (matches.length) {
+        return matches[0] ?? null;
+      }
+    }
+    try {
+      const created = await new Promise<chrome.tabs.Tab>((resolve) => {
+        chrome.tabs.create({ url }, (tab) => resolve(tab));
+      });
+      return created ?? null;
+    } catch (_error) {
+      // fall through to fallback resolution
+    }
+  }
+
+  if (fallbackTabId != null && fallbackTabId >= 0) {
+    const tab = await getTabById(fallbackTabId);
+    if (tab) {
+      return tab;
+    }
+  }
+
+  const activeTabs = await queryTabsAsync({ active: true, currentWindow: true });
+  return activeTabs[0] ?? null;
+}
+
+function buildUrlPatterns(targetUrl: string): string[] {
+  try {
+    const url = new URL(targetUrl);
+    return [
+      `${url.protocol}//${url.hostname}/*`,
+      url.protocol === "https:" ? `http://${url.hostname}/*` : `https://${url.hostname}/*`
+    ];
+  } catch {
+    return [];
+  }
+}
+
 chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
   if (!rawMessage || typeof rawMessage !== "object") {
     return false;
@@ -1228,6 +1344,8 @@ chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
       return handleMemoryIndexMessage(message.payload, sender, sendResponse);
     case "MEMORY_QUERY":
       return handleMemoryQueryMessage(message.payload, sender, sendResponse);
+    case "MEMORY_HIGHLIGHT":
+      return handleMemoryHighlightMessage(message.payload, sender, sendResponse);
     case "MEMORY_UPDATE_REQUEST":
       return handleMemoryUpdateMessage(message.payload, sender, sendResponse);
     default:
@@ -1329,6 +1447,23 @@ function handleMemoryQueryMessage(
       if (state.token !== currentToken) {
         return;
       }
+
+      const telemetryTabId = sender.tab?.id ?? null;
+      const filtersApplied = payload.filters && Object.keys(payload.filters).length > 0;
+      if (filtersApplied) {
+        emitTelemetryEvent(
+          "MEMORY_FILTERS",
+          { filters: payload.filters, results: response.results.length },
+          telemetryTabId
+        );
+      }
+      if (response.answerSuppressed) {
+        emitTelemetryEvent(
+          "MEMORY_ANSWER_FAILURE",
+          { reason: response.answerSuppressed },
+          telemetryTabId
+        );
+      }
       chrome.runtime.sendMessage({
         schemaVersion: SCHEMA_VERSION,
         type: "MEMORY_QUERY_RESULT",
@@ -1412,6 +1547,60 @@ function handleMemoryUpdateMessage(
         type: "MEMORY_UPDATE_ERROR",
         payload: { id: payload.id, message }
       });
+    }
+  })();
+
+  sendResponse?.({ accepted: true });
+  return false;
+}
+
+function handleMemoryHighlightMessage(
+  payload: { url?: string; sourceId?: string; snippet: string; title?: string },
+  sender: chrome.runtime.MessageSender,
+  sendResponse?: (response?: unknown) => void
+): boolean {
+  if (!payload || typeof payload.snippet !== "string" || !payload.snippet.trim()) {
+    logError("Received invalid MEMORY_HIGHLIGHT payload", payload);
+    return false;
+  }
+
+  const requesterTabId = sender.tab?.id ?? null;
+
+  void (async () => {
+    try {
+      const targetTab = await findHighlightTargetTab(payload.url, requesterTabId);
+      if (!targetTab?.id) {
+        chrome.runtime.sendMessage({
+          schemaVersion: SCHEMA_VERSION,
+          type: "MEMORY_HIGHLIGHT_ERROR",
+          payload: { message: "No matching tab to highlight" }
+        });
+        emitTelemetryEvent("MEMORY_HIGHLIGHT", { status: "not-found", url: payload.url }, requesterTabId);
+        return;
+      }
+
+      await focusTab(targetTab.id);
+      await waitForTabReady(targetTab.id);
+
+      sendResultToTab(targetTab.id, undefined, {
+        schemaVersion: SCHEMA_VERSION,
+        type: "MEMORY_HIGHLIGHT_RENDER",
+        payload: { sourceId: payload.sourceId, snippet: payload.snippet }
+      });
+
+      emitTelemetryEvent(
+        "MEMORY_HIGHLIGHT",
+        { status: "sent", url: payload.url, tabId: targetTab.id, sourceId: payload.sourceId },
+        targetTab.id
+      );
+    } catch (error) {
+      logError("Memory highlight failed", error);
+      chrome.runtime.sendMessage({
+        schemaVersion: SCHEMA_VERSION,
+        type: "MEMORY_HIGHLIGHT_ERROR",
+        payload: { message: "Unable to render highlight" }
+      });
+      emitTelemetryEvent("MEMORY_HIGHLIGHT", { status: "error", url: payload.url }, requesterTabId);
     }
   })();
 

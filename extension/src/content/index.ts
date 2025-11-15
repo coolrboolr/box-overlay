@@ -34,6 +34,7 @@ import { mountDebugHud, unmountDebugHud } from "./debugHud";
 import { createMemoryCaptureController } from "./memoryCapture";
 import { mountChatShell } from "./chatShell";
 import { closeChatPanel } from "../state/overlayStore";
+import { renderHighlight } from "./highlight";
 
 const activeProfile = getActiveProfile();
 const candidateSelector = activeProfile.selectors.join(",");
@@ -129,7 +130,9 @@ function isRuntimeMessage(message: unknown): message is RuntimeMessage {
     candidate.type === "TOGGLE_OVERLAYS" ||
     candidate.type === "DEV_TELEMETRY_EVENT" ||
     candidate.type === "MEMORY_INDEX_RESULT" ||
-    candidate.type === "MEMORY_CAPTURE_NOW"
+    candidate.type === "MEMORY_CAPTURE_NOW" ||
+    candidate.type === "MEMORY_HIGHLIGHT_RENDER" ||
+    candidate.type === "MEMORY_HIGHLIGHT_ERROR"
   );
 }
 
@@ -552,6 +555,14 @@ chrome.runtime.onMessage.addListener((message) => {
     case "MEMORY_CAPTURE_NOW":
       memoryCapture.handleCaptureCommand(message.payload ?? { force: true });
       break;
+    case "MEMORY_HIGHLIGHT_RENDER":
+      renderHighlight(message.payload as { sourceId?: string; snippet: string });
+      break;
+    case "MEMORY_HIGHLIGHT_ERROR":
+      if (isDev) {
+        debug("highlight error", message.payload);
+      }
+      break;
     default:
       break;
   }
@@ -563,6 +574,15 @@ function handleDevTelemetryEvent(payload: DevTelemetryEventPayload): void {
       break;
     case "BATCH_FALLBACK":
       recordEvent("batch-fallback", payload.detail);
+      break;
+    case "MEMORY_FILTERS":
+      recordEvent("memory-filters", payload.detail);
+      break;
+    case "MEMORY_HIGHLIGHT":
+      recordEvent("memory-highlight", payload.detail);
+      break;
+    case "MEMORY_ANSWER_FAILURE":
+      recordEvent("memory-answer-failure", payload.detail);
       break;
     default:
       break;

@@ -56,7 +56,8 @@ export async function createServerApp(options: CreateServerAppOptions = {}) {
         dedupKey: env.memoryDedupKey,
         maxCharsPerChunk: env.memoryMaxCharsPerChunk,
         embedModelVersion: env.memoryEmbedModelVersion,
-        allowModelMismatch: env.useFakeEmbeddings
+        allowModelMismatch: env.useFakeEmbeddings,
+        compactInterval: env.memoryCompactionInterval
       });
       await memoryStore.load();
       console.log("[memory] store loaded", {

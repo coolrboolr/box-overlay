@@ -1,16 +1,19 @@
 import {
   type MemoryQueryHit,
+  type MemoryQueryFilters,
   type MemoryQueryResponseMessage,
   type RuntimeMessage,
   SCHEMA_VERSION
 } from "../types/messages";
 
 interface FiltersState {
-  domain?: string;
+  domains: string[];
   since?: string;
+  until?: string;
   entityTypes?: string[];
   conceptIds?: string[];
-  tags?: string[];
+  tags: string[];
+  limit?: number;
 }
 
 export class PopupController {
@@ -19,11 +22,19 @@ export class PopupController {
   private statusEl: HTMLElement;
   private resultsEl: HTMLElement;
   private answerEl: HTMLElement;
+  private answerText: HTMLElement;
+  private answerNote: HTMLElement;
+  private answerSources: HTMLElement;
   private errorEl: HTMLElement;
   private domainFilterBtn: HTMLButtonElement;
-  private recentFilterBtn: HTMLButtonElement;
+  private addDomainBtn: HTMLButtonElement;
+  private rangeSelect: HTMLSelectElement;
+  private tagFilterBtn: HTMLButtonElement;
   private entityFilterBtn: HTMLButtonElement;
   private conceptFilterBtn: HTMLButtonElement;
+  private domainChips: HTMLElement;
+  private tagChips: HTMLElement;
+  private topKSelect: HTMLSelectElement;
   private tabSearchBtn: HTMLButtonElement;
   private tabChatBtn: HTMLButtonElement;
   private searchView: HTMLElement;
@@ -41,9 +52,10 @@ export class PopupController {
   private chatPendingBubble?: HTMLElement;
   private chatAwaiting = false;
   private activeDomain?: string;
-  private filters: FiltersState = {};
+  private filters: FiltersState = { domains: [], tags: [] };
   private entityOptions = ["article", "product", "person", "brand", "unknown"] as const;
   private entityIndex = -1;
+  private topK = 5;
 
   constructor(private readonly doc: Document = document) {
     this.queryInput = this.require<HTMLInputElement>("query-input");
@@ -51,11 +63,19 @@ export class PopupController {
     this.statusEl = this.require<HTMLElement>("status");
     this.resultsEl = this.require<HTMLElement>("results");
     this.answerEl = this.require<HTMLElement>("answer");
+    this.answerText = this.require<HTMLElement>("answer-text");
+    this.answerNote = this.require<HTMLElement>("answer-note");
+    this.answerSources = this.require<HTMLElement>("answer-sources");
     this.errorEl = this.require<HTMLElement>("error");
     this.domainFilterBtn = this.require<HTMLButtonElement>("filter-domain");
-    this.recentFilterBtn = this.require<HTMLButtonElement>("filter-recent");
+    this.addDomainBtn = this.require<HTMLButtonElement>("filter-add-domain");
+    this.rangeSelect = this.require<HTMLSelectElement>("filter-range");
+    this.tagFilterBtn = this.require<HTMLButtonElement>("filter-tags");
     this.entityFilterBtn = this.require<HTMLButtonElement>("filter-entity");
     this.conceptFilterBtn = this.require<HTMLButtonElement>("filter-concept");
+    this.domainChips = this.require<HTMLElement>("domain-chips");
+    this.tagChips = this.require<HTMLElement>("tag-chips");
+    this.topKSelect = this.require<HTMLSelectElement>("topk-select");
     this.tabSearchBtn = this.require<HTMLButtonElement>("tab-search");
     this.tabChatBtn = this.require<HTMLButtonElement>("tab-chat");
     this.searchView = this.require<HTMLElement>("search-view");
@@ -79,24 +99,59 @@ export class PopupController {
       if (!this.activeDomain) {
         return;
       }
-      if (this.filters.domain) {
-        delete this.filters.domain;
+      const idx = this.filters.domains.indexOf(this.activeDomain);
+      if (idx >= 0) {
+        this.filters.domains.splice(idx, 1);
         this.domainFilterBtn.classList.remove("active");
-      } else {
-        this.filters.domain = this.activeDomain;
+      } else if (this.filters.domains.length < 3) {
+        this.filters.domains.push(this.activeDomain);
         this.domainFilterBtn.classList.add("active");
+      }
+      this.renderDomainChips();
+    });
+
+    this.addDomainBtn.addEventListener("click", () => {
+      const input = (this.doc.defaultView?.prompt("Add domain or URL", this.activeDomain ?? "") ?? "").trim();
+      if (!input) {
+        return;
+      }
+      if (this.filters.domains.includes(input)) {
+        return;
+      }
+      if (this.filters.domains.length >= 3) {
+        this.setError("You can add up to 3 domains");
+        return;
+      }
+      this.filters.domains.push(input);
+      this.renderDomainChips();
+    });
+
+    this.rangeSelect.addEventListener("change", () => {
+      const days = Number(this.rangeSelect.value);
+      if (!days) {
+        delete this.filters.since;
+        delete this.filters.until;
+      } else {
+        const now = Date.now();
+        this.filters.until = new Date(now).toISOString();
+        this.filters.since = new Date(now - days * 24 * 60 * 60 * 1000).toISOString();
       }
     });
 
-    this.recentFilterBtn.addEventListener("click", () => {
-      if (this.filters.since) {
-        delete this.filters.since;
-        this.recentFilterBtn.classList.remove("active");
-      } else {
-        const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-        this.filters.since = since;
-        this.recentFilterBtn.classList.add("active");
-      }
+    this.tagFilterBtn.addEventListener("click", () => {
+      const existing = this.filters.tags ?? [];
+      const input =
+        this.doc.defaultView?.prompt(
+          "Tags (comma or space separated, max 10)",
+          existing.join(", ")
+        ) ?? "";
+      const tags = input
+        .split(/[\s,]+/)
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+        .slice(0, 10);
+      this.filters.tags = tags;
+      this.renderTagChips();
     });
 
     this.entityFilterBtn.addEventListener("click", () => {
@@ -105,6 +160,12 @@ export class PopupController {
 
     this.conceptFilterBtn.addEventListener("click", () => {
       this.toggleConceptFilter();
+    });
+
+    this.topKSelect.addEventListener("change", () => {
+      const parsed = Number(this.topKSelect.value);
+      this.topK = Number.isFinite(parsed) ? parsed : 5;
+      this.filters.limit = this.topK;
     });
 
     this.tabSearchBtn.addEventListener("click", () => this.switchTab("search"));
@@ -138,6 +199,9 @@ export class PopupController {
             this.setError(message.payload.message);
           }
           break;
+        case "MEMORY_HIGHLIGHT_ERROR":
+          this.setError(message.payload.message);
+          break;
         case "MEMORY_UPDATE_ERROR":
           this.setError(`Update failed: ${message.payload.message}`);
           break;
@@ -149,6 +213,9 @@ export class PopupController {
       }
     });
 
+    this.filters.limit = this.topK;
+    this.renderDomainChips();
+    this.renderTagChips();
     this.populateActiveTabDomain();
   }
 
@@ -183,13 +250,14 @@ export class PopupController {
       return;
     }
     this.setLoading();
+    const filters = this.buildFiltersPayload();
     chrome.runtime.sendMessage({
       schemaVersion: SCHEMA_VERSION,
       type: "MEMORY_QUERY",
       payload: {
         query,
-        topK: 5,
-        filters: this.filters
+        topK: this.topK,
+        filters
       }
     }, () => {
       const err = chrome.runtime.lastError;
@@ -231,6 +299,62 @@ export class PopupController {
     this.conceptFilterBtn.classList.add("active");
   }
 
+  private renderDomainChips(): void {
+    this.domainChips.innerHTML = "";
+    this.filters.domains.forEach((domain, index) => {
+      const chip = this.doc.createElement("span");
+      chip.className = "chip";
+      chip.textContent = domain;
+      const remove = this.doc.createElement("button");
+      remove.type = "button";
+      remove.textContent = "×";
+      remove.addEventListener("click", () => {
+        this.filters.domains.splice(index, 1);
+        this.renderDomainChips();
+      });
+      chip.appendChild(remove);
+      this.domainChips.appendChild(chip);
+    });
+    if (this.activeDomain) {
+      const pinned = this.filters.domains.includes(this.activeDomain);
+      this.domainFilterBtn.classList.toggle("active", pinned);
+    }
+  }
+
+  private renderTagChips(): void {
+    this.tagChips.innerHTML = "";
+    (this.filters.tags ?? []).forEach((tag, index) => {
+      const chip = this.doc.createElement("span");
+      chip.className = "chip";
+      chip.textContent = tag;
+      const remove = this.doc.createElement("button");
+      remove.type = "button";
+      remove.textContent = "×";
+      remove.addEventListener("click", () => {
+        const tags = [...(this.filters.tags ?? [])];
+        tags.splice(index, 1);
+        this.filters.tags = tags;
+        this.renderTagChips();
+      });
+      chip.appendChild(remove);
+      this.tagChips.appendChild(chip);
+    });
+    this.tagFilterBtn.classList.toggle("active", Boolean(this.filters.tags?.length));
+  }
+
+  private buildFiltersPayload(): MemoryQueryFilters {
+    const filters: MemoryQueryFilters = {
+      domains: this.filters.domains.length ? [...this.filters.domains] : undefined,
+      since: this.filters.since,
+      until: this.filters.until,
+      entityTypes: this.filters.entityTypes,
+      conceptIds: this.filters.conceptIds,
+      tags: this.filters.tags.length ? [...this.filters.tags] : undefined,
+      limit: this.topK
+    };
+    return filters;
+  }
+
   private setLoading(): void {
     this.statusEl.textContent = "Searching...";
     this.statusEl.dataset.state = "loading";
@@ -268,7 +392,8 @@ export class PopupController {
         type: "MEMORY_QUERY",
         payload: {
           query,
-          filters: this.filters,
+          filters: this.buildFiltersPayload(),
+          topK: this.topK,
           conversationId: this.conversationId,
           history: priorHistory
         }
@@ -306,6 +431,9 @@ export class PopupController {
         content: response.answer.text,
         sourceIds: response.answer.sourceIds
       });
+    } else if (response.answerSuppressed) {
+      this.appendChatBubble("assistant", response.answerSuppressed);
+      this.chatHistory.push({ role: "assistant", content: response.answerSuppressed });
     } else {
       this.appendChatBubble("assistant", "No direct answer; showing top results.");
       this.chatHistory.push({ role: "assistant", content: "No answer" });
@@ -359,26 +487,44 @@ export class PopupController {
       this.resultsEl.appendChild(this.renderResultCard(hit));
     });
 
+    this.renderAnswerPanel(response);
+  }
+
+  private renderAnswerPanel(response: MemoryQueryResponseMessage): void {
     if (response.answer) {
       this.answerEl.hidden = false;
-      this.answerEl.querySelector("p")!.textContent = response.answer.text;
-      const list = this.answerEl.querySelector("ul");
-      if (list) {
-        list.innerHTML = "";
-        response.answer.sources.forEach((source) => {
-          const li = this.doc.createElement("li");
-          li.textContent = source;
-          list.appendChild(li);
-        });
-      }
+      this.answerText.textContent = response.answer.text;
+      this.answerNote.textContent = "";
+      this.answerSources.innerHTML = "";
+      const sources = response.answer.sources ?? [];
+      const sourceIds = response.answer.sourceIds ?? [];
+      sources.forEach((source, idx) => {
+        const chip = this.doc.createElement("button");
+        chip.type = "button";
+        chip.className = "source-chip";
+        chip.textContent = source;
+        const hitId = sourceIds[idx];
+        chip.addEventListener("click", () => this.focusResultCard(hitId ?? source));
+        this.answerSources.appendChild(chip);
+      });
+    } else if (response.answerSuppressed) {
+      this.answerEl.hidden = false;
+      this.answerText.textContent = "No short answer available.";
+      this.answerNote.textContent = response.answerSuppressed;
+      this.answerSources.innerHTML = "";
     } else {
       this.answerEl.hidden = true;
+      this.answerText.textContent = "";
+      this.answerNote.textContent = "";
+      this.answerSources.innerHTML = "";
     }
   }
 
   private renderResultCard(hit: MemoryQueryHit): HTMLElement {
     const card = this.doc.createElement("article");
     card.className = "result";
+    card.dataset.hitId = hit.id;
+    card.id = `result-${hit.id}`;
 
     const title = this.doc.createElement("h3");
     title.textContent = hit.title || hit.url || "Untitled";
@@ -432,6 +578,12 @@ export class PopupController {
       }
     });
     actions.appendChild(openBtn);
+
+    const highlightBtn = this.doc.createElement("button");
+    highlightBtn.textContent = "Open & highlight";
+    highlightBtn.type = "button";
+    highlightBtn.addEventListener("click", () => this.requestHighlight(hit));
+    actions.appendChild(highlightBtn);
 
     const copyBtn = this.doc.createElement("button");
     copyBtn.textContent = "Copy snippet";
@@ -508,6 +660,49 @@ export class PopupController {
         tags
       }
     });
+  }
+
+  private focusResultCard(hitId?: string): void {
+    if (!hitId) {
+      return;
+    }
+    const cards = Array.from(this.resultsEl.querySelectorAll<HTMLElement>(".result"));
+    const target = cards.find((el) => el.dataset.hitId === hitId);
+    if (target) {
+      target.classList.add("focused");
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => target.classList.remove("focused"), 1200);
+    }
+  }
+
+  private requestHighlight(hit: MemoryQueryHit): void {
+    const snippet = hit.snippet?.trim();
+    if (!snippet) {
+      this.setError("No snippet to highlight.");
+      return;
+    }
+
+    chrome.runtime.sendMessage(
+      {
+        schemaVersion: SCHEMA_VERSION,
+        type: "MEMORY_HIGHLIGHT",
+        payload: {
+          url: hit.url,
+          sourceId: hit.sourceId ?? hit.parentId,
+          snippet,
+          title: hit.title
+        }
+      },
+      () => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          this.setError(err.message ?? "Unable to dispatch highlight");
+        } else {
+          this.statusEl.textContent = "Highlighting…";
+          this.statusEl.dataset.state = "ready";
+        }
+      }
+    );
   }
 
   private isRuntimeMessage(message: unknown): message is RuntimeMessage {

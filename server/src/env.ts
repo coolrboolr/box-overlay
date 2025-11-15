@@ -70,6 +70,8 @@ const EnvSchema = z.object({
   MEMORY_DEDUP_THRESHOLD: z.coerce.number().min(0).max(1).default(0.9),
   MEMORY_DEDUP_KEY: z.enum(["hash", "url", "cosine"]).default("cosine"),
   MEMORY_MAX_CHARS_PER_CHUNK: z.coerce.number().int().positive().default(1000),
+  MEMORY_COMPACTION_INTERVAL: z.coerce.number().int().nonnegative().default(50),
+  MEMORY_MAX_FILTER_DAYS: z.coerce.number().int().positive().default(90),
   USE_FAKE_EMBEDDINGS: z
     .string()
     .optional()
@@ -144,6 +146,8 @@ export const env = {
   memoryDedupThreshold: parsed.MEMORY_DEDUP_THRESHOLD,
   memoryDedupKey: parsed.MEMORY_DEDUP_KEY,
   memoryMaxCharsPerChunk: parsed.MEMORY_MAX_CHARS_PER_CHUNK,
+  memoryCompactionInterval: parsed.MEMORY_COMPACTION_INTERVAL,
+  memoryMaxFilterDays: parsed.MEMORY_MAX_FILTER_DAYS,
   useFakeEmbeddings: parsed.USE_FAKE_EMBEDDINGS,
   enableMemoryAnswers: parsed.ENABLE_MEMORY_ANSWERS,
   enableMemoryAdmin: parsed.ENABLE_MEMORY_ADMIN

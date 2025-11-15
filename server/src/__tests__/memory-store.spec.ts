@@ -230,6 +230,31 @@ describe("MemoryStore", () => {
     });
     expect(hits[0]?.sourceDomain).toBe("legacy.dev");
   });
+
+  it("compacts after configured interval", async () => {
+    const dbPath = await createTempPath();
+    const store = new MemoryStore({
+      dbPath,
+      dedupThreshold: 0.9,
+      dedupKey: "cosine",
+      maxCharsPerChunk: 128,
+      embedModelVersion: "test-model@1",
+      allowModelMismatch: true,
+      compactInterval: 1,
+      embed: fakeEmbed
+    });
+    await store.ingest([
+      {
+        id: "compact-1",
+        sourceId: "compact-1",
+        text: "Compaction interval test",
+        url: "https://compact.test"
+      }
+    ]);
+
+    const stats = await store.stats();
+    expect(stats.compactions).toBeGreaterThanOrEqual(1);
+  });
 });
 
 async function createTempPath(): Promise<string> {

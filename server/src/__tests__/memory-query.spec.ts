@@ -10,6 +10,7 @@ import { MemoryStore } from "../memory/store";
 import type { MemoryIndexItem } from "../schema";
 import { env } from "../env";
 import * as embeddingService from "../services/embedding";
+import * as memoryAnswer from "../services/memoryAnswer";
 
 const tempDirs: string[] = [];
 
@@ -57,14 +58,11 @@ describe("memory query endpoint", () => {
   it("includes generated answer when enabled", async () => {
     env.enableMemoryAnswers = true;
     const store = await createPopulatedStore();
-
-    vi.mock("../services/memoryAnswer", () => ({
-      generateMemoryAnswer: vi.fn(async () => ({
-        text: "Memory response",
-        sources: ["Snippet"],
-        sourceIds: ["alpha"]
-      }))
-    }));
+    vi.spyOn(memoryAnswer, "generateMemoryAnswer").mockResolvedValue({
+      text: "Memory response",
+      sources: ["Snippet"],
+      sourceIds: ["alpha"]
+    });
 
     vi.spyOn(embeddingService, "generateEmbedding").mockResolvedValue(new Float32Array([1, 0, 0, 0]));
 
@@ -82,7 +80,88 @@ describe("memory query endpoint", () => {
       .expect(200);
 
     expect(response.body.answer).toBeDefined();
-    vi.doUnmock("../services/memoryAnswer");
+  });
+
+  it("suppresses unsafe answers and returns reason", async () => {
+    env.enableMemoryAnswers = true;
+    const store = await createPopulatedStore();
+    vi.spyOn(embeddingService, "generateEmbedding").mockResolvedValue(new Float32Array([1, 0, 0, 0]));
+    vi.spyOn(memoryAnswer, "generateMemoryAnswer").mockRejectedValue(new Error("guard-fail"));
+
+    const { app } = await createServerApp({
+      enableMemory: true,
+      memoryStore: store,
+      enableDevExtensionRegistration: false,
+      enableBatchAnalyze: false,
+      allowedOrigins: new Set()
+    });
+
+    const response = await request(app)
+      .post("/api/memory/query")
+      .send({ query: "unsafe answer" })
+      .expect(200);
+
+    expect(response.body.answer).toBeUndefined();
+    expect(response.body.answerSuppressed).toBeDefined();
+  });
+
+  it("applies domain and tag filters", async () => {
+    env.enableMemoryAnswers = false;
+    vi.spyOn(embeddingService, "generateEmbedding").mockResolvedValue(new Float32Array([1, 0, 0, 0]));
+    const store = await createStoreWithItems([
+      {
+        id: "domain-a",
+        sourceId: "domain-a",
+        text: "Alpha domain memory",
+        url: "https://alpha.test/page",
+        tags: ["news"],
+        capturedAt: new Date().toISOString()
+      },
+      {
+        id: "domain-b",
+        sourceId: "domain-b",
+        text: "Beta domain memory",
+        url: "https://beta.test/page",
+        tags: ["other"],
+        capturedAt: new Date().toISOString()
+      }
+    ]);
+
+    const { app } = await createServerApp({
+      enableMemory: true,
+      memoryStore: store,
+      enableDevExtensionRegistration: false,
+      enableBatchAnalyze: false,
+      allowedOrigins: new Set()
+    });
+
+    const response = await request(app)
+      .post("/api/memory/query")
+      .send({ query: "domain", filters: { domains: ["alpha.test"], tags: ["news"] }, topK: 2 })
+      .expect(200);
+
+    expect(response.body.results).toHaveLength(1);
+    expect(response.body.results[0]?.url).toContain("alpha.test");
+  });
+
+  it("rejects overly long date ranges", async () => {
+    env.enableMemoryAnswers = false;
+    const store = await createPopulatedStore();
+    const { app } = await createServerApp({
+      enableMemory: true,
+      memoryStore: store,
+      enableDevExtensionRegistration: false,
+      enableBatchAnalyze: false,
+      allowedOrigins: new Set()
+    });
+
+    const since = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString();
+    const until = new Date().toISOString();
+
+    await request(app)
+      .post("/api/memory/query")
+      .send({ query: "memory", filters: { since, until } })
+      .expect(400);
   });
 });
 
@@ -128,6 +207,23 @@ async function fakeEmbed(text: string): Promise<Float32Array> {
   const vector = new Float32Array(4);
   vector[basisIndex] = 1;
   return vector;
+}
+
+async function createStoreWithItems(items: MemoryIndexItem[]): Promise<MemoryStore> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "memory-query-filter-"));
+  tempDirs.push(dir);
+  const store = new MemoryStore({
+    dbPath: path.join(dir, "store.json"),
+    dedupThreshold: 0.5,
+    dedupKey: "cosine",
+    maxCharsPerChunk: 512,
+    embedModelVersion: "test-model@1",
+    allowModelMismatch: true,
+    embed: fakeEmbed
+  });
+  await store.load();
+  await store.ingest(items);
+  return store;
 }
 
 function hash(input: string): number {

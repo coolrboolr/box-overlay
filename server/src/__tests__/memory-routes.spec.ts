@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createServerApp } from "../app";
 import { MemoryStore } from "../memory/store";
 import type { MemoryIndexItem } from "../schema";
+import { env } from "../env";
 
 const tempDirs: string[] = [];
 
@@ -57,6 +58,70 @@ describe("Memory routes", () => {
       .post("/api/memory/index")
       .send({ items: [] })
       .expect(400);
+  });
+
+  it("clears memory via admin endpoint when confirmed", async () => {
+    const original = env.enableMemoryAdmin;
+    env.enableMemoryAdmin = true;
+    try {
+      const store = await createStore();
+      const { app } = await createServerApp({
+        enableDevExtensionRegistration: false,
+        enableBatchAnalyze: false,
+        allowedOrigins: new Set(),
+        enableMemory: true,
+        memoryStore: store
+      });
+
+      await request(app)
+        .post("/api/memory/index")
+        .send({ items: [buildPayload("clear-1", "https://example.com")] });
+      const statsBefore = await store.stats();
+      expect(statsBefore.items).toBeGreaterThan(0);
+
+      await request(app)
+        .post("/api/memory/admin/clear")
+        .send({ confirm: "nope" })
+        .expect(400);
+
+      await request(app)
+        .post("/api/memory/admin/clear")
+        .send({ confirm: "ERASE" })
+        .expect(200);
+
+      const statsAfter = await store.stats();
+      expect(statsAfter.items).toBe(0);
+    } finally {
+      env.enableMemoryAdmin = original;
+    }
+  });
+
+  it("exports memory without embedding vectors", async () => {
+    const original = env.enableMemoryAdmin;
+    env.enableMemoryAdmin = true;
+    try {
+      const store = await createStore();
+      const { app } = await createServerApp({
+        enableDevExtensionRegistration: false,
+        enableBatchAnalyze: false,
+        allowedOrigins: new Set(),
+        enableMemory: true,
+        memoryStore: store
+      });
+
+      await request(app)
+        .post("/api/memory/index")
+        .send({ items: [buildPayload("export-1", "https://demo.dev")] })
+        .expect(200);
+
+      const response = await request(app).post("/api/memory/admin/export").send({}).expect(200);
+
+      expect(response.headers["content-disposition"]).toContain("attachment; filename=");
+      expect(response.body.schemaVersion).toBeDefined();
+      expect(response.body.items?.[0]?.vector).toBeUndefined();
+    } finally {
+      env.enableMemoryAdmin = original;
+    }
   });
 });
 

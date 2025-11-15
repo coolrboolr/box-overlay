@@ -36,6 +36,7 @@ const DEFAULT_TOP_K = 5;
 const MAX_TOP_K = 20;
 const COSINE_RANGE = parseCosineRange(process.env.COSINE_RANGE ?? "0-1");
 const ONTOLOGY_MODE = (process.env.ONTOLOGY_MODE ?? "strict").toLowerCase() === "loose" ? "loose" : "strict";
+const MAX_FILTER_RANGE_DAYS = parsePositiveInt(process.env.MEMORY_MAX_FILTER_DAYS, 90);
 
 type OntologyMode = "strict" | "loose";
 
@@ -381,7 +382,7 @@ export type MemoryStatsResponse = z.infer<typeof MemoryStatsResponseSchema>;
 export const MemoryQueryFiltersSchema = z
   .object({
     domain: HostOrUrlSchema.optional(),
-    domains: z.array(HostOrUrlSchema).max(8).optional(),
+    domains: z.array(HostOrUrlSchema).max(3).optional(),
     since: z.string().datetime().optional(),
     until: z.string().datetime().optional(),
     limit: z.number().int().min(1).max(50).optional(),
@@ -395,6 +396,15 @@ export const MemoryQueryFiltersSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "since must be earlier than or equal to until"
+      });
+    }
+    const since = value.since ? Date.parse(value.since) : null;
+    const until = value.until ? Date.parse(value.until) : null;
+    const rangeEnd = until ?? Date.now();
+    if (since && rangeEnd - since > MAX_FILTER_RANGE_DAYS * 24 * 60 * 60 * 1000) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `date ranges must be <=${MAX_FILTER_RANGE_DAYS} days`
       });
     }
   });
@@ -473,7 +483,8 @@ export const MemoryQueryResponseSchema = z
         sourceIds: z.array(z.string().min(1)).optional()
       })
       .strict()
-      .optional()
+      .optional(),
+    answerSuppressed: z.string().min(1).max(200).optional()
   })
   .strict();
 

@@ -82,15 +82,35 @@ These tools are dev-only (`isDev` builds). They never run in production bundles.
    ```bash
    curl -X POST http://127.0.0.1:5000/api/memory/index \
      -H "Content-Type: application/json" \
-     -d '{"items":[{"id":"mem-1","text":"Persistent memory smoke text","url":"https://example.com","title":"Example","capturedAt":"'$(date -Iseconds)'"}]}'
+     -d @- <<'JSON'
+   {
+     "items": [
+       {
+         "id": "mem-1",
+         "text": "Persistent memory smoke text",
+         "url": "https://example.com",
+         "title": "Example",
+         "capturedAt": """$(date -Iseconds)"""
+       }
+     ]
+   }
+   JSON
    ```
-   A healthy response returns counts for `indexed`, `duplicate`, and `failed` along with stored chunk IDs.
+   (On macOS without GNU coreutils, install `gdate` or replace `date` above.) A healthy response returns counts for `indexed`, `duplicate`, and `failed` along with stored chunk IDs.
 4. Inspect stats:
    ```bash
    curl http://127.0.0.1:5000/api/memory/stats | jq
    ```
    Confirm the `items`, `vectors`, and `lastPersistedAt` fields reflect the ingested content.
 5. Delete the `.cache/memory-store.json` file if you need a clean slate between manual tests; the server will recreate it on next boot.
+
+## Memory Filters, Highlights, & Maintenance
+
+1. **Popup filters.** Use the popup filter rows to pin “This domain,” add up to three domains, pick a date range preset (7/30/90 days), and add free-text tags. The `Top K` dropdown mirrors the backend `limit` so payload size stays bounded.
+2. **Source chips + highlights.** Result cards now include “Open & highlight”; answer source chips scroll to the matching hit. If the URL is not open, the background worker opens a new tab and flashes the snippet for a few seconds.
+3. **Harness filter builder.** The static harness (`chrome-extension://<id>/static/harness/index.html`) includes a “Filter Builder” panel to send `MEMORY_QUERY` messages with domains/tags/date presets without hitting the live backend.
+4. **Admin endpoints.** Set `ENABLE_MEMORY_ADMIN=true` to unlock `POST /api/memory/admin/clear { "confirm": "ERASE" }` and `POST /api/memory/admin/export`. Both are localhost-only, logged, and export payloads omit vectors for safety. Avoid enabling this flag in any publicly reachable environment unless you add authentication.
+5. **Telemetry.** The dev HUD tracks `memoryFilters`, `memoryHighlights`, and `memoryAnswerFailures`; export logs (Alt+Shift+L) now include these counters.
 
 ## Local Harness
 

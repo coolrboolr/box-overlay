@@ -25,6 +25,7 @@ interface MemoryStoreOptions {
   embedModelVersion: string;
   allowModelMismatch?: boolean;
   embed?: EmbeddingGenerator;
+  compactInterval?: number;
 }
 
 interface StoredRelation {
@@ -73,6 +74,8 @@ export interface PersistenceFile {
   items: PersistenceRecord[];
 }
 
+export type MemoryExportItem = Omit<PersistenceRecord, "vector" | "contentHash">;
+
 export interface MemorySearchOptions {
   vector: Float32Array;
   topK: number;
@@ -93,6 +96,7 @@ export class MemoryStore {
   private readonly embedModelVersion: string;
   private readonly allowModelMismatch: boolean;
   private readonly embedText: EmbeddingGenerator;
+  private readonly compactInterval: number;
   private loadPromise: Promise<void> | null = null;
   private queue: Promise<void> = Promise.resolve();
   private records: StoredRecord[] = [];
@@ -100,6 +104,7 @@ export class MemoryStore {
   private lastPersistedAt?: string;
   private lastFileSizeBytes = 0;
   private compactions = 0;
+  private ingestsSinceCompaction = 0;
 
   constructor(options: MemoryStoreOptions) {
     this.dbPath = options.dbPath;
@@ -109,6 +114,7 @@ export class MemoryStore {
     this.embedModelVersion = options.embedModelVersion;
     this.allowModelMismatch = Boolean(options.allowModelMismatch);
     this.embedText = options.embed ?? generateEmbedding;
+    this.compactInterval = Math.max(0, options.compactInterval ?? 0);
   }
 
   async load(): Promise<void> {
@@ -163,6 +169,11 @@ export class MemoryStore {
 
       if (indexed > 0) {
         await this.persist();
+        this.ingestsSinceCompaction += indexed;
+        if (this.compactInterval > 0 && this.ingestsSinceCompaction >= this.compactInterval) {
+          await this.performCompaction();
+          this.ingestsSinceCompaction = 0;
+        }
       }
 
       return {
@@ -313,10 +324,34 @@ export class MemoryStore {
   async compact(): Promise<void> {
     await this.load();
     return this.enqueue(async () => {
-      this.records = this.records.filter((record) => !record.duplicateOf);
-      this.compactions += 1;
-      await this.persist();
+      await this.performCompaction();
     });
+  }
+
+  async clear(): Promise<void> {
+    await this.load();
+    return this.enqueue(async () => {
+      this.records = [];
+      this.vectorLength = null;
+      this.lastPersistedAt = undefined;
+      this.lastFileSizeBytes = 0;
+      this.compactions = 0;
+      this.ingestsSinceCompaction = 0;
+      await fs.rm(this.dbPath, { force: true });
+    });
+  }
+
+  async export(): Promise<{ schemaVersion: number; exportedAt: string; items: MemoryExportItem[] }> {
+    await this.load();
+    const items: MemoryExportItem[] = this.records.map(({ vector: _vector, contentHash: _hash, ...rest }) => ({
+      ...rest
+    }));
+
+    return {
+      schemaVersion: MEMORY_SCHEMA_VERSION,
+      exportedAt: new Date().toISOString(),
+      items
+    };
   }
 
   private async initializeFromDisk(): Promise<void> {
@@ -331,12 +366,10 @@ export class MemoryStore {
           return this.initializeFromDisk();
         }
         await this.backupExisting();
-        this.records = [];
-        this.vectorLength = null;
-        this.lastPersistedAt = undefined;
-        this.lastFileSizeBytes = 0;
-        this.compactions = 0;
-        return;
+        console.error(
+          `[memory] incompatible schema detected in ${this.dbPath}; expected ${MEMORY_SCHEMA_VERSION}, found ${parsed.schemaVersion}`
+        );
+        throw new Error("Memory store schema mismatch detected; aborting startup");
       }
 
       if (!parsed.embedModelVersion) {
@@ -364,6 +397,7 @@ export class MemoryStore {
       }));
       this.lastPersistedAt = parsed.updatedAt;
       this.compactions = parsed.compactions ?? 0;
+      this.ingestsSinceCompaction = 0;
       const stats = await fs.stat(this.dbPath);
       this.lastFileSizeBytes = stats.size;
     } catch (error) {
@@ -372,6 +406,7 @@ export class MemoryStore {
         this.vectorLength = null;
         this.lastFileSizeBytes = 0;
         this.compactions = 0;
+        this.ingestsSinceCompaction = 0;
         return;
       }
       throw error;
@@ -542,6 +577,12 @@ export class MemoryStore {
       };
     }
     return null;
+  }
+
+  private async performCompaction(): Promise<void> {
+    this.records = this.records.filter((record) => !record.duplicateOf);
+    this.compactions += 1;
+    await this.persist();
   }
 
   private buildTagCounts(): { counts: Record<string, number>; taggedItems: number } {

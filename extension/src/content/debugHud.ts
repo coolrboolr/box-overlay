@@ -12,7 +12,10 @@ const STAT_LABELS: Record<StatKey, string> = {
   errors: "Errors",
   forbiddenRecoveries: "403 recoveries",
   forbiddenErrors: "Forbidden errors",
-  batchFallbacks: "Batch fallbacks"
+  batchFallbacks: "Batch fallbacks",
+  memoryFilters: "Memory filters",
+  memoryHighlights: "Memory highlights",
+  memoryAnswerFailures: "Answer failures"
 };
 
 let root: HTMLElement | null = null;
