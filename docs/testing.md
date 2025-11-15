@@ -1,3 +1,13 @@
+# Testing Reference
+
+- Overlay spec coverage map: see `docs/testing/overlay-coverage.md` for SPEC1–25 → tests.
+- New chat search/filter tests live under `extension/src/__tests__/`:
+  - `chat-store.spec.ts` (persistence + filtering core)
+  - `chat-filters.spec.ts` (search semantics)
+  - `ChatFilters.spec.tsx` (UI/UX)
+  - `ChatPanel.spec.tsx` (panel states + debounce + focus)
+  - `useChats.spec.ts` (hook plumbing + telemetry)
+
 # Telemetry HUD & Log Export
 
 These tools are dev-only (`isDev` builds). They never run in production bundles.

@@ -1,91 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
-import type { Chat } from "../../types/chat";
 import { closeChatPanel, useOverlayState } from "../../state/overlayStore";
+import { useOntologyContext } from "../../hooks/useOntologyContext";
+import { useChats } from "../../hooks/useChats";
 import ChatList from "./ChatList";
 import ChatDetail from "./ChatDetail";
+import ChatFilters from "./ChatFilters";
 
 const FOCUSABLE_SELECTOR =
   'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
 interface ChatPanelProps {
   launcherRef: RefObject<HTMLButtonElement>;
-}
-
-function getDomainFromUrl(url?: string): string | undefined {
-  if (!url) {
-    return undefined;
-  }
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return undefined;
-  }
-}
-
-function createStubChats(): Chat[] {
-  const now = new Date().toISOString();
-  const pageUrl = typeof window !== "undefined" ? window.location.href : "https://example.com";
-  const domain = getDomainFromUrl(pageUrl) ?? "example.com";
-
-  return [
-    {
-      chatId: "chat-pinned-1",
-      title: "Current page overview",
-      messages: [],
-      anchors: {
-        pageUrl,
-        domain,
-        entities: [
-          { id: "entity-1", label: "Current page", type: "article" },
-          { id: "entity-2", label: "Example anchor", type: "unknown" }
-        ],
-        relationships: []
-      },
-      pinned: true,
-      createdAt: now,
-      updatedAt: now,
-      lastTouched: now
-    },
-    {
-      chatId: "chat-recent-1",
-      title: "Entity follow-ups",
-      messages: [],
-      anchors: {
-        pageUrl,
-        domain,
-        entities: [{ id: "entity-3", label: "Widgets Inc", type: "brand" }],
-        relationships: []
-      },
-      pinned: false,
-      createdAt: now,
-      updatedAt: now,
-      lastTouched: now
-    },
-    {
-      chatId: "chat-recent-2",
-      title: "Relationship notes",
-      messages: [],
-      anchors: {
-        pageUrl,
-        domain,
-        entities: [{ id: "entity-4", label: "Sample person", type: "person" }],
-        relationships: [
-          {
-            id: "rel-1",
-            type: "mentions",
-            fromId: "entity-4",
-            toId: "entity-1",
-            label: "Mentions this page"
-          }
-        ]
-      },
-      pinned: false,
-      createdAt: now,
-      updatedAt: now,
-      lastTouched: now
-    }
-  ];
 }
 
 function getFocusableElements(root: HTMLElement | null): HTMLElement[] {
@@ -103,10 +29,60 @@ function getFocusableElements(root: HTMLElement | null): HTMLElement[] {
 
 export function ChatPanel({ launcherRef }: ChatPanelProps): JSX.Element | null {
   const { chatPanelOpen } = useOverlayState();
+  const ontology = useOntologyContext();
   const [selectedChatId, setSelectedChatId] = useState<string | undefined>();
-  const chats = useMemo(() => createStubChats(), []);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [scopeToggles, setScopeToggles] = useState({
+    includePage: Boolean(ontology.pageUrl),
+    includeDomain: Boolean(ontology.domain),
+    includeEntities: ontology.entities.length > 0,
+    includeRelationships: ontology.relationships.length > 0,
+    includeMessages: true
+  });
   const panelRef = useRef<HTMLDivElement>(null);
   const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    setSearching(true);
+    const handle = window.setTimeout(() => setDebouncedSearch(search.trim()), 180);
+    return () => window.clearTimeout(handle);
+  }, [search]);
+
+  useEffect(() => {
+    setSearching(false);
+  }, [debouncedSearch]);
+
+  useEffect(() => {
+    setScopeToggles((current) => ({
+      ...current,
+      includePage: Boolean(ontology.pageUrl),
+      includeDomain: Boolean(ontology.domain),
+      includeEntities: ontology.entities.length > 0,
+      includeRelationships: ontology.relationships.length > 0
+    }));
+  }, [ontology.pageUrl, ontology.domain, ontology.entities.length, ontology.relationships.length]);
+
+  const scope = useMemo(
+    () => ({
+      pageUrl: scopeToggles.includePage ? ontology.pageUrl : undefined,
+      domain: scopeToggles.includeDomain ? ontology.domain : undefined,
+      entityIds: scopeToggles.includeEntities ? ontology.entities.map((e) => e.id) : undefined,
+      relationshipIds: scopeToggles.includeRelationships
+        ? ontology.relationships.map((r) => r.id)
+        : undefined
+    }),
+    [ontology, scopeToggles]
+  );
+
+  const chatResult = useChats({
+    query: debouncedSearch,
+    scope,
+    includeMessages: scopeToggles.includeMessages
+  });
+
+  const chats = useMemo(() => chatResult.chats, [chatResult.chats]);
 
   useEffect(() => {
     if (chatPanelOpen && !selectedChatId && chats.length > 0) {
@@ -114,6 +90,16 @@ export function ChatPanel({ launcherRef }: ChatPanelProps): JSX.Element | null {
       setSelectedChatId((pinned ?? chats[0]).chatId);
     }
   }, [chatPanelOpen, selectedChatId, chats]);
+
+  useEffect(() => {
+    if (!selectedChatId && chats.length === 0) {
+      return;
+    }
+    const stillExists = chats.some((chat) => chat.chatId === selectedChatId);
+    if (!stillExists && chats.length > 0) {
+      setSelectedChatId(chats[0].chatId);
+    }
+  }, [chats, selectedChatId]);
 
   useEffect(() => {
     if (!chatPanelOpen) {
@@ -219,11 +205,68 @@ export function ChatPanel({ launcherRef }: ChatPanelProps): JSX.Element | null {
         </header>
 
         <div className="llm-chat-panel__body" aria-labelledby="llm-chat-panel-heading">
-          <ChatList
-            chats={chats}
-            selectedChatId={selectedChatId}
-            onSelect={setSelectedChatId}
-          />
+          <div className="llm-chat-panel__sidebar">
+            <ChatFilters
+              search={search}
+              onSearchChange={setSearch}
+              toggles={scopeToggles}
+              onToggle={(key) =>
+                setScopeToggles((current) => ({
+                  ...current,
+                  [key]: !current[key as keyof typeof current]
+                }))
+              }
+              loading={chatResult.loading || searching}
+              stats={{
+                total: chatResult.totalCount,
+                filtered: chatResult.filteredCount,
+                truncated: chatResult.truncated,
+                durationMs: chatResult.durationMs
+              }}
+              contextLabels={{
+                page: ontology.pageUrl,
+                domain: ontology.domain,
+                entities: ontology.entities.map((e) => e.label),
+                relationships: ontology.relationships.map((r) => r.label ?? r.type ?? r.id)
+              }}
+            />
+            {!chatResult.loading && !ontology.pageUrl && !ontology.domain && ontology.entities.length === 0 && ontology.relationships.length === 0 ? (
+              <p className="llm-chat-list__empty" role="note">
+                No ontology context detected on this page yet.
+              </p>
+            ) : null}
+            {chatResult.error ? (
+              <div className="llm-chat-list__empty llm-chat-list__empty--error" role="alert">
+                <p>Could not load chats.</p>
+                <button type="button" onClick={() => chatResult.refresh()}>
+                  Retry
+                </button>
+              </div>
+            ) : chatResult.loading ? (
+              <div className="llm-chat-list__empty">
+                <span className="llm-spinner" aria-hidden="true" /> Loading chats…
+              </div>
+            ) : chats.length === 0 ? (
+              <div className="llm-chat-list__empty" aria-live="polite">
+                {chatResult.totalCount === 0
+                  ? "No chats yet. Start a new chat from this page."
+                  : "No chats match your filters."}
+              </div>
+            ) : (
+              <>
+                {chatResult.truncated ? (
+                  <p className="llm-chat-list__hint" role="status">
+                    Showing first {chatResult.filteredCount} results.
+                  </p>
+                ) : null}
+                <ChatList
+                  chats={chats}
+                  selectedChatId={selectedChatId}
+                  onSelect={setSelectedChatId}
+                />
+              </>
+            )}
+          </div>
           <ChatDetail chat={selectedChat} />
         </div>
       </aside>
