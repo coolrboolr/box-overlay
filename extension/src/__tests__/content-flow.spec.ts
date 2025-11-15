@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { SCHEMA_VERSION, type RuntimeMessage } from "../types/messages";
-import { __resetTelemetryStoreForTests, getEntries } from "../content/logStore";
+
+type LogStoreModule = typeof import("../content/logStore");
 
 function createChromeContentMock() {
   const sendMessage = vi.fn((message: unknown, responseCallback?: () => void) => {
@@ -57,13 +58,15 @@ function createChromeContentMock() {
 
 describe("content pipeline", () => {
   let chromeMock: ReturnType<typeof createChromeContentMock>;
+  let logStore: LogStoreModule;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers();
     vi.resetModules();
+    logStore = await import("../content/logStore");
     chromeMock = createChromeContentMock();
     (globalThis as any).chrome = chromeMock;
-    __resetTelemetryStoreForTests();
+    logStore.__resetTelemetryStoreForTests();
     document.body.innerHTML = `
       <main>
         <article class="post">
@@ -195,6 +198,7 @@ describe("content pipeline", () => {
   });
 
   it("caps anchor recovery attempts and records a terminal failure", async () => {
+    vi.useRealTimers();
     await import("../content/index");
 
     const listener = chromeMock.runtime.onMessage.addListener.mock.calls[0][0];
@@ -214,7 +218,7 @@ describe("content pipeline", () => {
 
     article?.remove();
 
-    for (let attempt = 0; attempt < 4; attempt += 1) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       listener({
         schemaVersion: SCHEMA_VERSION,
         type: "ANALYZE_RESULT",
@@ -224,16 +228,20 @@ describe("content pipeline", () => {
           isAd: false
         }
       });
-      await Promise.resolve();
+      await vi.waitFor(() => {
+        const retryEvents = logStore
+          .getEntries()
+          .filter((entry) => entry.type === "retry" && entry.detail?.reason === "anchor");
+        expect(retryEvents.length).toBe(attempt + 1);
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
-    const entries = getEntries();
-    const retryEvents = entries.filter((entry) => entry.type === "retry" && entry.detail?.reason === "anchor");
-    expect(retryEvents.length).toBeGreaterThan(0);
-
-    const terminalError = entries.find(
-      (entry) => entry.type === "error" && entry.detail?.reason === "anchor-miss-max"
-    );
-    expect(terminalError).toBeTruthy();
+    await vi.waitFor(() => {
+      const terminalError = logStore
+        .getEntries()
+        .find((entry) => entry.type === "error" && entry.detail?.reason === "anchor-miss-max");
+      expect(terminalError).toBeTruthy();
+    });
   });
 });
